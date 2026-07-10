@@ -3,55 +3,37 @@ import { supabase } from '../lib/supabase'
 import { formatARS } from '../lib/utils'
 import type { Trabajo } from '../types'
 
-type DateFilter = 'semana' | 'mes' | 'mes_pasado' | 'historico'
-
-function getRange(filter: DateFilter): { inicio: string; fin: string } | null {
-  const now = new Date()
-  if (filter === 'historico') return null
-  if (filter === 'semana') {
-    const d = new Date(now)
-    d.setDate(now.getDate() - ((now.getDay() + 6) % 7))
-    d.setHours(0, 0, 0, 0)
-    return { inicio: d.toISOString(), fin: now.toISOString() }
-  }
-  if (filter === 'mes') {
-    return {
-      inicio: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
-      fin: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString(),
-    }
-  }
-  return {
-    inicio: new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString(),
-    fin: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString(),
-  }
+function toDateInput(d: Date) {
+  return d.toISOString().split('T')[0]
 }
 
-const FILTERS: { value: DateFilter; label: string }[] = [
-  { value: 'semana', label: 'Esta Semana' },
-  { value: 'mes', label: 'Este Mes' },
-  { value: 'mes_pasado', label: 'Mes Pasado' },
-  { value: 'historico', label: 'Histórico' },
-]
+const now = new Date()
+const defaultDesde = toDateInput(new Date(now.getFullYear(), now.getMonth(), 1))
+const defaultHasta = toDateInput(new Date(now.getFullYear(), now.getMonth() + 1, 0))
+
+const dateInp =
+  'w-full bg-zinc-900 border border-zinc-700 focus:border-orange-500 text-zinc-100 py-3 px-3 rounded-xl outline-none [color-scheme:dark]'
 
 export default function Dashboard() {
-  const [filter, setFilter] = useState<DateFilter>('mes')
+  const [desde, setDesde] = useState(defaultDesde)
+  const [hasta, setHasta] = useState(defaultHasta)
   const [stats, setStats] = useState({ facturacion: 0, ganancia: 0 })
   const [enTaller, setEnTaller] = useState<Trabajo[]>([])
+  const [loading, setLoading] = useState(false)
 
-  const loadData = useCallback(async () => {
-    const range = getRange(filter)
-
-    let statsQ = supabase
-      .from('trabajos')
-      .select('precio_cobrado, ganancia_neta')
-      .eq('estado', 'Entregado')
-
-    if (range) {
-      statsQ = statsQ.gte('fecha', range.inicio).lte('fecha', range.fin)
-    }
+  const fetchData = useCallback(async (d: string, h: string) => {
+    if (!d || !h) return
+    setLoading(true)
+    const inicio = new Date(d + 'T00:00:00').toISOString()
+    const fin = new Date(h + 'T23:59:59').toISOString()
 
     const [{ data: statsData }, { data: tallerData }] = await Promise.all([
-      statsQ,
+      supabase
+        .from('trabajos')
+        .select('precio_cobrado, ganancia_neta')
+        .eq('estado', 'Entregado')
+        .gte('fecha', inicio)
+        .lte('fecha', fin),
       supabase
         .from('trabajos')
         .select('*')
@@ -66,11 +48,12 @@ export default function Dashboard() {
       })
     }
     if (tallerData) setEnTaller(tallerData as Trabajo[])
-  }, [filter])
+    setLoading(false)
+  }, [])
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    fetchData(defaultDesde, defaultHasta)
+  }, [fetchData])
 
   return (
     <div className="px-4 pt-6">
@@ -78,22 +61,36 @@ export default function Dashboard() {
         SYK<span className="text-orange-500"> MOTOS</span>
       </h1>
 
-      {/* Filtro de fecha */}
-      <div className="relative mb-5">
-        <select
-          value={filter}
-          onChange={e => setFilter(e.target.value as DateFilter)}
-          className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-lg font-bold py-4 px-4 rounded-xl outline-none appearance-none cursor-pointer"
+      {/* Filtro de fechas exactas */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-5 space-y-3">
+        <p className="text-zinc-500 text-xs font-bold tracking-widest uppercase">Período</p>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-zinc-600 text-xs block mb-1">Desde</label>
+            <input
+              type="date"
+              value={desde}
+              onChange={e => setDesde(e.target.value)}
+              className={dateInp}
+            />
+          </div>
+          <div>
+            <label className="text-zinc-600 text-xs block mb-1">Hasta</label>
+            <input
+              type="date"
+              value={hasta}
+              onChange={e => setHasta(e.target.value)}
+              className={dateInp}
+            />
+          </div>
+        </div>
+        <button
+          onClick={() => fetchData(desde, hasta)}
+          disabled={loading || !desde || !hasta}
+          className="w-full bg-orange-500 active:bg-orange-600 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-black py-3.5 rounded-xl tracking-widest uppercase text-sm transition-colors"
         >
-          {FILTERS.map(f => (
-            <option key={f.value} value={f.value}>
-              {f.label}
-            </option>
-          ))}
-        </select>
-        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500">
-          ▾
-        </span>
+          {loading ? 'CARGANDO...' : 'FILTRAR'}
+        </button>
       </div>
 
       {/* Métricas */}

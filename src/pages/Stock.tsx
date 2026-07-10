@@ -148,8 +148,8 @@ export default function Stock() {
 
       {/* Modal nuevo repuesto */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-end">
-          <div className="w-full max-w-lg mx-auto bg-zinc-900 rounded-t-2xl border-t border-zinc-800 p-5 space-y-4">
+        <div className="fixed inset-0 bg-black/80 z-[60] flex items-end">
+          <div className="w-full max-w-lg mx-auto bg-zinc-900 rounded-t-2xl border-t border-zinc-800 p-5 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-1">
               <p className="text-zinc-100 font-black text-lg tracking-wide">Nuevo Repuesto</p>
               <button onClick={() => setShowModal(false)} className="text-zinc-500 p-1">

@@ -173,7 +173,7 @@ export default function RepuestosSection({ items, onChange }: Props) {
 
       {/* Modal de stock — bottom sheet */}
       {showStockModal && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-end">
+        <div className="fixed inset-0 bg-black/80 z-[60] flex items-end">
           <div className="w-full max-w-lg mx-auto bg-zinc-900 rounded-t-2xl border-t border-zinc-800 p-5 max-h-[70vh] flex flex-col">
             <div className="flex items-center justify-between mb-4 shrink-0">
               <p className="text-zinc-100 font-black text-lg">Agregar del Stock</p>
