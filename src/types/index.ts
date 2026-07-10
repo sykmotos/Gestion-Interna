@@ -20,6 +20,9 @@ export interface Trabajo {
   metodo_pago: string
   informe_final: string | null
   repuestos_jsonb: object[] | null
+  kilometraje: string | null
+  sena: number
+  saldo_pendiente: number
 }
 
 export interface Inventario {

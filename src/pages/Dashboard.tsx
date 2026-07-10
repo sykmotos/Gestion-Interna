@@ -15,8 +15,8 @@ const dateInp =
   'w-full bg-zinc-900 border border-zinc-700 focus:border-orange-500 text-zinc-100 py-3 px-3 rounded-xl outline-none [color-scheme:dark]'
 
 export default function Dashboard() {
-  const [desde, setDesde] = useState(defaultDesde)
-  const [hasta, setHasta] = useState(defaultHasta)
+  const [desde, setDesde] = useState(() => localStorage.getItem('dash_desde') ?? defaultDesde)
+  const [hasta, setHasta] = useState(() => localStorage.getItem('dash_hasta') ?? defaultHasta)
   const [stats, setStats] = useState({ facturacion: 0, ganancia: 0 })
   const [enTaller, setEnTaller] = useState<Trabajo[]>([])
   const [loading, setLoading] = useState(false)
@@ -70,7 +70,7 @@ export default function Dashboard() {
             <input
               type="date"
               value={desde}
-              onChange={e => setDesde(e.target.value)}
+              onChange={e => { setDesde(e.target.value); localStorage.setItem('dash_desde', e.target.value) }}
               className={dateInp}
             />
           </div>
@@ -79,7 +79,7 @@ export default function Dashboard() {
             <input
               type="date"
               value={hasta}
-              onChange={e => setHasta(e.target.value)}
+              onChange={e => { setHasta(e.target.value); localStorage.setItem('dash_hasta', e.target.value) }}
               className={dateInp}
             />
           </div>

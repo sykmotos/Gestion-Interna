@@ -28,7 +28,14 @@ function estadoBadge(estado: string) {
 }
 
 export default function Ordenes() {
-  const [tab, setTab] = useState<'nuevo' | 'todas'>('nuevo')
+  // — Persistencia de tab y búsqueda —
+  const [tab, setTab] = useState<'nuevo' | 'todas'>(
+    () => (localStorage.getItem('ordenes_tab') as 'nuevo' | 'todas') ?? 'nuevo',
+  )
+  const switchTab = (t: 'nuevo' | 'todas') => {
+    setTab(t)
+    localStorage.setItem('ordenes_tab', t)
+  }
 
   // — Nuevo ingreso —
   const [patente, setPatente] = useState('')
@@ -37,6 +44,8 @@ export default function Ordenes() {
   const [dni, setDni] = useState('')
   const [modeloMoto, setModeloMoto] = useState('')
   const [fallaDec, setFallaDec] = useState('')
+  const [kilometraje, setKilometraje] = useState('')
+  const [sena, setSena] = useState('')
   const [repuestosNuevo, setRepuestosNuevo] = useState<RepuestoItem[]>([])
   const [buscando, setBuscando] = useState(false)
   const [clienteStatus, setClienteStatus] = useState<'existente' | 'nuevo' | null>(null)
@@ -46,7 +55,7 @@ export default function Ordenes() {
   const [trabajos, setTrabajos] = useState<Trabajo[]>([])
   const [clienteMap, setClienteMap] = useState<Record<string, Cliente>>({})
   const [loadingTrabajos, setLoadingTrabajos] = useState(false)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(() => localStorage.getItem('ordenes_search') ?? '')
   const [pendienteEntrega, setPendienteEntrega] = useState<string | null>(null)
   const [repuestosEntrega, setRepuestosEntrega] = useState<RepuestoItem[]>([])
   const [entregaForm, setEntregaForm] = useState<EntregaForm>({
@@ -112,7 +121,8 @@ export default function Ordenes() {
         t.patente_id.toLowerCase().includes(q) ||
         c?.nombre_dueño?.toLowerCase().includes(q) ||
         c?.dni?.toLowerCase().includes(q) ||
-        c?.modelo_moto?.toLowerCase().includes(q)
+        c?.modelo_moto?.toLowerCase().includes(q) ||
+        c?.telefono?.toLowerCase().includes(q)
       )
     })
   }, [trabajos, clienteMap, search])
@@ -124,11 +134,14 @@ export default function Ordenes() {
     setDni('')
     setModeloMoto('')
     setFallaDec('')
+    setKilometraje('')
+    setSena('')
     setRepuestosNuevo([])
     setClienteStatus(null)
   }
 
   const costoNuevo = repuestosNuevo.reduce((s, i) => s + i.costo, 0)
+  const senaNum = parseFloat(sena) || 0
 
   const guardarIngreso = async () => {
     if (!patente || guardando) return
@@ -140,21 +153,45 @@ export default function Ordenes() {
           { patente, nombre_dueño: nombreDueño, telefono, dni: dni || null, modelo_moto: modeloMoto },
           { onConflict: 'patente' },
         )
-      const { error } = await supabase.from('trabajos').insert({
-        patente_id: patente,
-        detalle_trabajo: fallaDec,
-        repuestos_usados: repuestosNuevo.map(r => r.nombre).join(', '),
-        costo_repuestos: costoNuevo,
-        precio_cobrado: 0,
-        ganancia_neta: 0,
-        estado: 'En Taller',
-        metodo_pago: 'Efectivo',
-        repuestos_jsonb: repuestosNuevo,
-      })
+
+      const { data: nuevoTrabajo, error } = await supabase
+        .from('trabajos')
+        .insert({
+          patente_id: patente,
+          detalle_trabajo: fallaDec,
+          repuestos_usados: repuestosNuevo.map(r => r.nombre).join(', '),
+          costo_repuestos: costoNuevo,
+          precio_cobrado: 0,
+          ganancia_neta: 0,
+          estado: 'En Taller',
+          metodo_pago: 'Efectivo',
+          repuestos_jsonb: repuestosNuevo,
+          kilometraje: kilometraje.trim() || null,
+          sena: senaNum,
+          saldo_pendiente: 0,
+        })
+        .select()
+        .single()
+
       if (error) throw error
-      await decrementarStock(repuestosNuevo)
+
+      // Si hay seña, registrarla en caja
+      const ops: Promise<unknown>[] = [decrementarStock(repuestosNuevo)]
+      if (senaNum > 0 && nuevoTrabajo) {
+        ops.push(
+          supabase.from('caja_movimientos').insert({
+            tipo: 'ingreso',
+            concepto: `Seña Trabajo - ${patente}`,
+            monto: senaNum,
+            metodo_pago: 'Efectivo',
+            trabajo_id: nuevoTrabajo.id,
+          }),
+        )
+      }
+      await Promise.all(ops)
+
       resetNuevo()
-      setTab('todas')
+      switchTab('todas')
     } catch (err) {
       console.error(err)
       alert('Error al guardar. Revisá los datos.')
@@ -188,6 +225,10 @@ export default function Ordenes() {
     const cliente = clienteMap[t?.patente_id ?? '']
     const nombreCliente = cliente?.nombre_dueño ?? t?.patente_id ?? ''
 
+    // Lógica de seña: la caja recibe solo el saldo pendiente
+    const senaExistente = t?.sena ?? 0
+    const saldoPendiente = Math.max(0, precio - senaExistente)
+
     const { error } = await supabase
       .from('trabajos')
       .update({
@@ -199,20 +240,28 @@ export default function Ordenes() {
         metodo_pago: entregaForm.metodo_pago,
         informe_final: entregaForm.informe_final.trim() || null,
         repuestos_jsonb: repuestosEntrega,
+        saldo_pendiente: saldoPendiente,
       })
       .eq('id', id)
 
     if (!error) {
-      await Promise.all([
-        decrementarStock(repuestosEntrega),
-        supabase.from('caja_movimientos').insert({
-          tipo: 'ingreso',
-          concepto: `Entrega: ${nombreCliente} (${t?.patente_id ?? ''})`,
-          monto: precio,
-          metodo_pago: entregaForm.metodo_pago,
-          trabajo_id: id,
-        }),
-      ])
+      const ops: Promise<unknown>[] = [decrementarStock(repuestosEntrega)]
+
+      // Solo registrar el saldo si es > 0 (para no duplicar si ya se cobró con seña)
+      if (saldoPendiente > 0) {
+        ops.push(
+          supabase.from('caja_movimientos').insert({
+            tipo: 'ingreso',
+            concepto: `Entrega: ${nombreCliente} (${t?.patente_id ?? ''})`,
+            monto: saldoPendiente,
+            metodo_pago: entregaForm.metodo_pago,
+            trabajo_id: id,
+          }),
+        )
+      }
+
+      await Promise.all(ops)
+
       setTrabajos(prev =>
         prev.map(w =>
           w.id === id
@@ -225,6 +274,7 @@ export default function Ordenes() {
                 ganancia_neta: ganancia,
                 metodo_pago: entregaForm.metodo_pago,
                 informe_final: entregaForm.informe_final.trim() || null,
+                saldo_pendiente: saldoPendiente,
               }
             : w,
         ),
@@ -240,7 +290,7 @@ export default function Ordenes() {
       {/* Tabs */}
       <div className="flex bg-zinc-900 rounded-xl p-1 mb-6 border border-zinc-800">
         <button
-          onClick={() => setTab('nuevo')}
+          onClick={() => switchTab('nuevo')}
           className={`flex-1 py-3 rounded-lg text-sm font-black tracking-wide transition-colors ${
             tab === 'nuevo' ? 'bg-orange-500 text-white' : 'text-zinc-500'
           }`}
@@ -248,7 +298,7 @@ export default function Ordenes() {
           NUEVO INGRESO
         </button>
         <button
-          onClick={() => { setTab('todas'); loadTrabajos() }}
+          onClick={() => { switchTab('todas'); loadTrabajos() }}
           className={`flex-1 py-3 rounded-lg text-sm font-black tracking-wide transition-colors ${
             tab === 'todas' ? 'bg-orange-500 text-white' : 'text-zinc-500'
           }`}
@@ -289,73 +339,56 @@ export default function Ordenes() {
           </div>
 
           <div>
-            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-              Nombre del Dueño
-            </label>
-            <input
-              type="text"
-              value={nombreDueño}
-              onChange={e => setNombreDueño(e.target.value)}
-              placeholder="Juan Pérez"
-              className={`${inp} text-xl`}
-            />
+            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Nombre del Dueño</label>
+            <input type="text" value={nombreDueño} onChange={e => setNombreDueño(e.target.value)} placeholder="Juan Pérez" className={`${inp} text-xl`} />
           </div>
 
           <div>
-            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-              DNI
-            </label>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={dni}
-              onChange={e => setDni(e.target.value.replace(/\D/g, ''))}
-              placeholder="12345678"
-              className={`${inp} text-xl`}
-            />
+            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">DNI</label>
+            <input type="text" inputMode="numeric" value={dni} onChange={e => setDni(e.target.value.replace(/\D/g, ''))} placeholder="12345678" className={`${inp} text-xl`} />
           </div>
 
           <div>
-            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-              Teléfono
-            </label>
-            <input
-              type="tel"
-              value={telefono}
-              onChange={e => setTelefono(e.target.value)}
-              placeholder="11 1234-5678"
-              className={`${inp} text-xl`}
-            />
+            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Teléfono</label>
+            <input type="tel" value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="11 1234-5678" className={`${inp} text-xl`} />
           </div>
 
           <div>
-            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-              Modelo de Moto
-            </label>
-            <input
-              type="text"
-              value={modeloMoto}
-              onChange={e => setModeloMoto(e.target.value)}
-              placeholder="Honda XR 150"
-              className={`${inp} text-xl`}
-            />
+            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Modelo de Moto</label>
+            <input type="text" value={modeloMoto} onChange={e => setModeloMoto(e.target.value)} placeholder="Honda XR 150" className={`${inp} text-xl`} />
           </div>
 
           <div>
-            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-              Falla Declarada
-            </label>
-            <textarea
-              value={fallaDec}
-              onChange={e => setFallaDec(e.target.value)}
-              placeholder="¿Qué le pasa a la moto?"
-              rows={3}
-              className={`${inp} text-lg resize-none`}
-            />
+            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Kilometraje (opcional)</label>
+            <input type="text" inputMode="numeric" value={kilometraje} onChange={e => setKilometraje(e.target.value)} placeholder="Ej: 15000 km" className={`${inp} text-xl`} />
           </div>
 
-          {/* Repuestos */}
+          <div>
+            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Falla Declarada</label>
+            <textarea value={fallaDec} onChange={e => setFallaDec(e.target.value)} placeholder="¿Qué le pasa a la moto?" rows={3} className={`${inp} text-lg resize-none`} />
+          </div>
+
           <RepuestosSection items={repuestosNuevo} onChange={setRepuestosNuevo} />
+
+          {/* Seña */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-1">
+            <label className="text-zinc-500 text-xs font-bold tracking-widest block uppercase">
+              Seña / Adelanto (opcional)
+            </label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={sena}
+              onChange={e => setSena(e.target.value)}
+              placeholder="$0"
+              className={`${inp} text-2xl font-bold`}
+            />
+            {senaNum > 0 && (
+              <p className="text-green-500 text-xs font-bold pt-1">
+                ✓ Se registrará {formatARS(senaNum)} en caja al guardar
+              </p>
+            )}
+          </div>
 
           <button
             onClick={guardarIngreso}
@@ -370,27 +403,23 @@ export default function Ordenes() {
       {/* ── Tab: Ver Todas ── */}
       {tab === 'todas' && (
         <div className="space-y-3">
-          {/* Buscador */}
           <div className="relative mb-1">
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
             <input
               type="text"
               value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar por patente, nombre, DNI, modelo..."
+              onChange={e => { setSearch(e.target.value); localStorage.setItem('ordenes_search', e.target.value) }}
+              placeholder="Patente, nombre, DNI, teléfono, modelo..."
               className="w-full bg-zinc-900 border border-zinc-700 focus:border-orange-500 text-zinc-100 py-4 pl-11 pr-4 rounded-xl outline-none placeholder:text-zinc-600 transition-colors"
             />
           </div>
 
           {loadingTrabajos && (
-            <p className="text-zinc-600 text-center py-8 text-sm font-bold tracking-widest">
-              CARGANDO...
-            </p>
+            <p className="text-zinc-600 text-center py-8 text-sm font-bold tracking-widest">CARGANDO...</p>
           )}
 
           {trabajosFiltrados.map(t => (
             <div key={t.id} className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-              {/* Cabecera */}
               <div className="p-4">
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div className="flex-1 min-w-0">
@@ -402,17 +431,17 @@ export default function Ordenes() {
                         </p>
                       )}
                     </div>
-                    <p className="text-zinc-400 text-sm mt-0.5 line-clamp-2">
-                      {t.detalle_trabajo || '—'}
-                    </p>
+                    <p className="text-zinc-400 text-sm mt-0.5 line-clamp-2">{t.detalle_trabajo || '—'}</p>
                     {t.repuestos_usados && (
-                      <p className="text-zinc-600 text-xs mt-0.5 line-clamp-1">
-                        Rep: {t.repuestos_usados}
-                      </p>
+                      <p className="text-zinc-600 text-xs mt-0.5 line-clamp-1">Rep: {t.repuestos_usados}</p>
                     )}
                     {t.informe_final && (
-                      <p className="text-zinc-500 text-xs mt-0.5 line-clamp-2 italic">
-                        Informe: {t.informe_final}
+                      <p className="text-zinc-500 text-xs mt-0.5 line-clamp-2 italic">Informe: {t.informe_final}</p>
+                    )}
+                    {t.sena > 0 && (
+                      <p className="text-yellow-500 text-xs mt-0.5 font-bold">
+                        Seña: {formatARS(t.sena)}
+                        {t.saldo_pendiente > 0 && ` · Saldo: ${formatARS(t.saldo_pendiente)}`}
                       </p>
                     )}
                     <p className="text-zinc-600 text-xs mt-1">{formatFecha(t.fecha)}</p>
@@ -425,9 +454,7 @@ export default function Ordenes() {
                       className={`text-xs font-bold py-2 px-3 rounded-lg outline-none border bg-transparent cursor-pointer ${estadoBadge(t.estado || 'En Taller')}`}
                     >
                       {ESTADOS.map(e => (
-                        <option key={e} value={e} className="bg-zinc-900 text-zinc-100">
-                          {e}
-                        </option>
+                        <option key={e} value={e} className="bg-zinc-900 text-zinc-100">{e}</option>
                       ))}
                     </select>
                     <button
@@ -443,9 +470,7 @@ export default function Ordenes() {
                 {t.estado === 'Entregado' && t.precio_cobrado > 0 && (
                   <div className="flex justify-between items-center mt-2 pt-2 border-t border-zinc-800">
                     <span className="text-zinc-500 text-xs">Cobrado: {formatARS(t.precio_cobrado)}</span>
-                    <span className="text-orange-500 text-xs font-bold">
-                      Ganancia: {formatARS(t.ganancia_neta)}
-                    </span>
+                    <span className="text-orange-500 text-xs font-bold">Ganancia: {formatARS(t.ganancia_neta)}</span>
                   </div>
                 )}
               </div>
@@ -457,14 +482,11 @@ export default function Ordenes() {
                     Cerrar orden — Repuestos y cobro
                   </p>
 
-                  <RepuestosSection
-                    items={repuestosEntrega}
-                    onChange={setRepuestosEntrega}
-                  />
+                  <RepuestosSection items={repuestosEntrega} onChange={setRepuestosEntrega} />
 
                   <div>
                     <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-                      Precio Cobrado al Cliente ($)
+                      Precio Total Cobrado ($)
                     </label>
                     <input
                       type="number"
@@ -481,9 +503,7 @@ export default function Ordenes() {
                     onChange={e => setEntregaForm(f => ({ ...f, metodo_pago: e.target.value }))}
                     className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 py-4 px-4 rounded-xl outline-none"
                   >
-                    {METODOS_PAGO.map(m => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
+                    {METODOS_PAGO.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
 
                   <div>
@@ -499,19 +519,29 @@ export default function Ordenes() {
                     />
                   </div>
 
-                  {/* Preview de ganancia */}
+                  {/* Preview financiero con seña */}
                   {entregaForm.precio_cobrado && (
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 flex justify-between items-center">
-                      <div>
-                        <p className="text-zinc-600 text-xs">Repuestos: {formatARS(repuestosEntrega.reduce((s, i) => s + i.costo, 0))}</p>
-                        <p className="text-zinc-500 text-xs font-bold">Ganancia neta</p>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 space-y-1.5">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-zinc-500">Repuestos</span>
+                        <span className="text-zinc-400">{formatARS(repuestosEntrega.reduce((s, i) => s + i.costo, 0))}</span>
                       </div>
-                      <span className="text-orange-500 font-black text-xl">
-                        {formatARS(
-                          (parseFloat(entregaForm.precio_cobrado) || 0) -
-                            repuestosEntrega.reduce((s, i) => s + i.costo, 0),
-                        )}
-                      </span>
+                      {(t.sena ?? 0) > 0 && (
+                        <div className="flex justify-between text-xs">
+                          <span className="text-yellow-500 font-bold">Seña ya cobrada</span>
+                          <span className="text-yellow-500 font-bold">-{formatARS(t.sena ?? 0)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between border-t border-zinc-800 pt-1.5">
+                        <span className="text-zinc-400 text-xs font-bold">
+                          {(t.sena ?? 0) > 0 ? 'Saldo a cobrar hoy' : 'Ganancia neta'}
+                        </span>
+                        <span className="text-orange-500 font-black text-lg">
+                          {(t.sena ?? 0) > 0
+                            ? formatARS(Math.max(0, (parseFloat(entregaForm.precio_cobrado) || 0) - (t.sena ?? 0)))
+                            : formatARS((parseFloat(entregaForm.precio_cobrado) || 0) - repuestosEntrega.reduce((s, i) => s + i.costo, 0))}
+                        </span>
+                      </div>
                     </div>
                   )}
 

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { formatARS } from '../lib/utils'
 import type { Trabajo } from '../types'
 import { X } from 'lucide-react'
 import RepuestosSection, {
@@ -22,39 +23,46 @@ interface Props {
 
 export default function EditTrabajoModal({ trabajo, onClose, onSaved }: Props) {
   const [detalle, setDetalle] = useState(trabajo.detalle_trabajo ?? '')
+  const [kilometraje, setKilometraje] = useState(trabajo.kilometraje ?? '')
   const [estado, setEstado] = useState(trabajo.estado ?? 'En Taller')
   const [metodo, setMetodo] = useState(trabajo.metodo_pago ?? 'Efectivo')
+  const [precio, setPrecio] = useState(trabajo.precio_cobrado > 0 ? String(trabajo.precio_cobrado) : '')
+  const [sena, setSena] = useState(trabajo.sena > 0 ? String(trabajo.sena) : '')
   const [informeFinal, setInformeFinal] = useState(trabajo.informe_final ?? '')
   const [repuestos, setRepuestos] = useState<RepuestoItem[]>(
     (trabajo.repuestos_jsonb ?? []) as RepuestoItem[],
   )
   const [guardando, setGuardando] = useState(false)
 
-  // Snapshot al abrir — para calcular diff al guardar
   const repuestosOriginales = (trabajo.repuestos_jsonb ?? []) as RepuestoItem[]
+
+  const precioNum = parseFloat(precio) || 0
+  const senaNum = parseFloat(sena) || 0
+  const nuevoCosto = repuestos.reduce((s, r) => s + r.costo, 0)
+  const nuevaGanancia = precioNum - nuevoCosto
+  const saldoPendiente = Math.max(0, precioNum - senaNum)
 
   const guardar = async () => {
     if (guardando) return
     setGuardando(true)
 
-    // Diff: qué se agregó vs qué se eliminó respecto al estado inicial
     const keysOriginales = new Set(repuestosOriginales.map(r => r.key))
     const keysNuevos = new Set(repuestos.map(r => r.key))
-
     const agregados = repuestos.filter(r => !keysOriginales.has(r.key))
     const eliminados = repuestosOriginales.filter(r => !keysNuevos.has(r.key))
 
-    const nuevoCosto = repuestos.reduce((s, r) => s + r.costo, 0)
-    const nuevaGanancia = trabajo.precio_cobrado - nuevoCosto
-
     const updates = {
       detalle_trabajo: detalle.trim(),
+      kilometraje: kilometraje.trim() || null,
       estado,
       metodo_pago: metodo,
+      precio_cobrado: precioNum,
+      sena: senaNum,
+      saldo_pendiente: saldoPendiente,
+      ganancia_neta: nuevaGanancia,
       informe_final: informeFinal.trim() || null,
       repuestos_usados: repuestos.map(r => r.nombre).join(', '),
       costo_repuestos: nuevoCosto,
-      ganancia_neta: nuevaGanancia,
       repuestos_jsonb: repuestos,
     }
 
@@ -64,7 +72,6 @@ export default function EditTrabajoModal({ trabajo, onClose, onSaved }: Props) {
       .eq('id', trabajo.id)
 
     if (!error) {
-      // Ajustar stock: descuenta los nuevos de stock, devuelve los eliminados de stock
       await Promise.all([
         decrementarStock(agregados),
         incrementarStock(eliminados),
@@ -73,8 +80,6 @@ export default function EditTrabajoModal({ trabajo, onClose, onSaved }: Props) {
     }
     setGuardando(false)
   }
-
-  const costoTotal = repuestos.reduce((s, r) => s + r.costo, 0)
 
   return (
     <div className="fixed inset-0 bg-black/80 z-[60] flex items-end">
@@ -89,10 +94,9 @@ export default function EditTrabajoModal({ trabajo, onClose, onSaved }: Props) {
           </button>
         </div>
 
+        {/* Falla / Descripción */}
         <div>
-          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-            Falla / Descripción
-          </label>
+          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Falla / Descripción</label>
           <textarea
             value={detalle}
             onChange={e => setDetalle(e.target.value)}
@@ -102,66 +106,115 @@ export default function EditTrabajoModal({ trabajo, onClose, onSaved }: Props) {
           />
         </div>
 
-        {/* Repuestos con lógica de diff de stock */}
+        {/* Kilometraje */}
+        <div>
+          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Kilometraje</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={kilometraje}
+            onChange={e => setKilometraje(e.target.value)}
+            placeholder="Ej: 15000 km"
+            className={inp}
+          />
+        </div>
+
+        {/* Repuestos con diff de stock */}
         <RepuestosSection items={repuestos} onChange={setRepuestos} />
 
-        {/* Preview costo total si cambió */}
-        {repuestos.length > 0 && trabajo.precio_cobrado > 0 && (
-          <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 flex justify-between items-center">
-            <div>
-              <p className="text-zinc-500 text-xs">Precio cobrado: ${trabajo.precio_cobrado.toLocaleString('es-AR')}</p>
-              <p className="text-zinc-500 text-xs font-bold">Ganancia neta recalculada</p>
+        {/* Precio cobrado */}
+        <div>
+          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Precio Cobrado ($)</label>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={precio}
+            onChange={e => setPrecio(e.target.value)}
+            placeholder="0"
+            className={`${inp} text-2xl font-bold`}
+          />
+        </div>
+
+        {/* Seña */}
+        <div>
+          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Seña / Adelanto ($)</label>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={sena}
+            onChange={e => setSena(e.target.value)}
+            placeholder="0"
+            className={`${inp} text-2xl font-bold`}
+          />
+        </div>
+
+        {/* Panel financiero */}
+        {(precioNum > 0 || repuestos.length > 0) && (
+          <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-3 space-y-1.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-zinc-500">Costo repuestos</span>
+              <span className="text-zinc-300">{formatARS(nuevoCosto)}</span>
             </div>
-            <span className={`font-black text-xl ${trabajo.precio_cobrado - costoTotal >= 0 ? 'text-orange-500' : 'text-red-400'}`}>
-              ${(trabajo.precio_cobrado - costoTotal).toLocaleString('es-AR')}
-            </span>
+            {senaNum > 0 && (
+              <div className="flex justify-between text-xs">
+                <span className="text-yellow-500 font-bold">Seña</span>
+                <span className="text-yellow-500 font-bold">{formatARS(senaNum)}</span>
+              </div>
+            )}
+            {precioNum > 0 && senaNum > 0 && (
+              <div className="flex justify-between text-xs">
+                <span className="text-zinc-400">Saldo pendiente</span>
+                <span className="text-zinc-300">{formatARS(saldoPendiente)}</span>
+              </div>
+            )}
+            {precioNum > 0 && (
+              <div className="flex justify-between border-t border-zinc-700 pt-1.5">
+                <span className="text-zinc-400 text-xs font-bold">Ganancia neta</span>
+                <span className={`font-black text-lg ${nuevaGanancia >= 0 ? 'text-orange-500' : 'text-red-400'}`}>
+                  {formatARS(nuevaGanancia)}
+                </span>
+              </div>
+            )}
           </div>
         )}
 
+        {/* Estado */}
         <div>
-          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-            Estado
-          </label>
+          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Estado</label>
           <select
             value={estado}
             onChange={e => setEstado(e.target.value)}
             className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 py-4 px-4 rounded-xl outline-none"
           >
-            {ESTADOS.map(e => (
-              <option key={e} value={e}>{e}</option>
-            ))}
+            {ESTADOS.map(e => <option key={e} value={e}>{e}</option>)}
           </select>
         </div>
 
+        {/* Método de pago */}
         <div>
-          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-            Método de Pago
-          </label>
+          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Método de Pago</label>
           <select
             value={metodo}
             onChange={e => setMetodo(e.target.value)}
             className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 py-4 px-4 rounded-xl outline-none"
           >
-            {METODOS_PAGO.map(m => (
-              <option key={m} value={m}>{m}</option>
-            ))}
+            {METODOS_PAGO.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
 
+        {/* Informe final */}
         <div>
-          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-            Informe Final (opcional)
-          </label>
+          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Informe Final</label>
           <textarea
             value={informeFinal}
             onChange={e => setInformeFinal(e.target.value)}
             placeholder="¿Qué se hizo? Diagnóstico final, trabajos realizados..."
-            rows={4}
+            rows={5}
             className={`${inp} resize-none`}
           />
         </div>
 
-        <div className="flex gap-2 pt-1">
+        <div className="flex gap-2 pt-1 pb-2">
           <button
             onClick={onClose}
             className="flex-1 bg-zinc-800 text-zinc-400 font-bold py-4 rounded-xl"

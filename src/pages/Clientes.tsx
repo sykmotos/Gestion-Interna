@@ -6,7 +6,7 @@ import { ChevronDown, ChevronUp, MessageCircle, Pencil } from 'lucide-react'
 import EditClienteModal from '../components/EditClienteModal'
 
 export default function Clientes() {
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(() => localStorage.getItem('clientes_query') ?? '')
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [historiales, setHistoriales] = useState<Record<string, Trabajo[]>>({})
@@ -19,7 +19,7 @@ export default function Clientes() {
       let q = supabase.from('clientes').select('*').order('nombre_dueño')
 
       if (query.length >= 2) {
-        q = q.or(`patente.ilike.%${query}%,nombre_dueño.ilike.%${query}%,dni.ilike.%${query}%`)
+        q = q.or(`patente.ilike.%${query}%,nombre_dueño.ilike.%${query}%,dni.ilike.%${query}%,telefono.ilike.%${query}%,modelo_moto.ilike.%${query}%`)
       } else {
         q = q.limit(20)
       }
@@ -54,8 +54,8 @@ export default function Clientes() {
       <input
         type="text"
         value={query}
-        onChange={e => setQuery(e.target.value.toUpperCase())}
-        placeholder="Buscar por patente o nombre..."
+        onChange={e => { const v = e.target.value.toUpperCase(); setQuery(v); localStorage.setItem('clientes_query', v) }}
+        placeholder="Patente, nombre, DNI, teléfono, modelo..."
         className="w-full bg-zinc-900 border border-zinc-700 focus:border-orange-500 text-zinc-100 text-lg py-4 px-5 rounded-xl outline-none mb-5 uppercase placeholder:normal-case placeholder:text-zinc-600 transition-colors"
       />
 

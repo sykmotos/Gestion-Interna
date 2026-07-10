@@ -52,7 +52,10 @@ ALTER TABLE clientes  ADD COLUMN IF NOT EXISTS dni          VARCHAR;
 ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS estado          VARCHAR DEFAULT 'En Taller';
 ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS metodo_pago     VARCHAR DEFAULT 'Efectivo';
 ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS informe_final   TEXT;
-ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS repuestos_jsonb JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS repuestos_jsonb   JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS kilometraje       VARCHAR;
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS sena              NUMERIC DEFAULT 0;
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS saldo_pendiente   NUMERIC DEFAULT 0;
 
 -- Habilitar RLS
 ALTER TABLE clientes         ENABLE ROW LEVEL SECURITY;

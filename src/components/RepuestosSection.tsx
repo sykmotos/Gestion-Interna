@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatARS } from '../lib/utils'
 import type { Inventario } from '../types'
-import { Package, PenLine, Trash2, X } from 'lucide-react'
+import { Package, PenLine, Trash2, X, Pencil, Check } from 'lucide-react'
 
 export interface RepuestoItem {
   key: string
@@ -27,6 +27,9 @@ export default function RepuestosSection({ items, onChange }: Props) {
   const [loadingStock, setLoadingStock] = useState(false)
   const [manualNombre, setManualNombre] = useState('')
   const [manualCosto, setManualCosto] = useState('')
+  // Edición de precio inline
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [editingVal, setEditingVal] = useState('')
 
   const openStockModal = async () => {
     setShowStockModal(true)
@@ -72,6 +75,17 @@ export default function RepuestosSection({ items, onChange }: Props) {
 
   const remove = (key: string) => onChange(items.filter(i => i.key !== key))
 
+  const startEditPrice = (item: RepuestoItem) => {
+    setEditingKey(item.key)
+    setEditingVal(String(item.costo))
+  }
+
+  const commitEditPrice = (key: string) => {
+    const newPrice = parseFloat(editingVal) || 0
+    onChange(items.map(i => i.key === key ? { ...i, costo: newPrice } : i))
+    setEditingKey(null)
+  }
+
   const total = items.reduce((s, i) => s + i.costo, 0)
 
   return (
@@ -80,20 +94,53 @@ export default function RepuestosSection({ items, onChange }: Props) {
         Repuestos Utilizados
       </label>
 
-      {/* Lista de repuestos agregados */}
       {items.length > 0 && (
         <div className="space-y-2 mb-3">
           {items.map(item => (
             <div
               key={item.key}
-              className="bg-zinc-800 rounded-xl px-4 py-3 flex items-center gap-3 border border-zinc-700"
+              className="bg-zinc-800 rounded-xl px-3 py-3 flex items-center gap-2 border border-zinc-700"
             >
               <div className="flex-1 min-w-0">
                 <p className="text-zinc-100 text-sm font-bold leading-tight">{item.nombre}</p>
-                <p className="text-zinc-500 text-xs mt-0.5">
-                  {item.type === 'stock' ? '📦 Stock' : '✍️ Manual'} · {formatARS(item.costo)}
+                <p className="text-zinc-600 text-xs mt-0.5">
+                  {item.type === 'stock' ? '📦 Stock' : '✍️ Manual'}
                 </p>
               </div>
+
+              {/* Precio editable inline */}
+              {editingKey === item.key ? (
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-zinc-500 text-sm">$</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={editingVal}
+                    autoFocus
+                    onChange={e => setEditingVal(e.target.value)}
+                    onBlur={() => commitEditPrice(item.key)}
+                    onKeyDown={e => e.key === 'Enter' && commitEditPrice(item.key)}
+                    className="w-24 bg-zinc-700 border border-orange-500 text-orange-400 font-black py-1 px-2 rounded-lg outline-none text-sm text-right"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => commitEditPrice(item.key)}
+                    className="text-orange-500 p-1"
+                  >
+                    <Check size={15} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => startEditPrice(item)}
+                  className="flex items-center gap-1 shrink-0 bg-zinc-700 border border-zinc-600 rounded-lg px-2.5 py-1.5 active:bg-zinc-600"
+                >
+                  <span className="text-orange-400 font-black text-sm">{formatARS(item.costo)}</span>
+                  <Pencil size={11} className="text-zinc-500" />
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => remove(item.key)}
@@ -104,7 +151,6 @@ export default function RepuestosSection({ items, onChange }: Props) {
             </div>
           ))}
 
-          {/* Total automático */}
           <div className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 flex justify-between items-center">
             <span className="text-zinc-400 text-sm font-bold">Total repuestos</span>
             <span className="text-orange-500 font-black text-xl">{formatARS(total)}</span>
@@ -112,7 +158,6 @@ export default function RepuestosSection({ items, onChange }: Props) {
         </div>
       )}
 
-      {/* Botones de agregar */}
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
@@ -132,7 +177,6 @@ export default function RepuestosSection({ items, onChange }: Props) {
         </button>
       </div>
 
-      {/* Formulario manual inline */}
       {showManual && (
         <div className="mt-2 bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
           <input
@@ -148,7 +192,7 @@ export default function RepuestosSection({ items, onChange }: Props) {
             inputMode="decimal"
             value={manualCosto}
             onChange={e => setManualCosto(e.target.value)}
-            placeholder="Costo ($)"
+            placeholder="Precio de venta ($)"
             className={inp}
           />
           <div className="flex gap-2">
@@ -171,7 +215,6 @@ export default function RepuestosSection({ items, onChange }: Props) {
         </div>
       )}
 
-      {/* Modal de stock — bottom sheet */}
       {showStockModal && (
         <div className="fixed inset-0 bg-black/80 z-[60] flex items-end">
           <div className="w-full max-w-lg mx-auto bg-zinc-900 rounded-t-2xl border-t border-zinc-800 p-5 max-h-[70vh] flex flex-col">
@@ -205,10 +248,11 @@ export default function RepuestosSection({ items, onChange }: Props) {
                     {item.categoria && (
                       <p className="text-zinc-500 text-xs mt-0.5">{item.categoria}</p>
                     )}
-                    <p className="text-zinc-600 text-xs mt-0.5">Stock disponible: {item.cantidad}</p>
+                    <p className="text-zinc-600 text-xs mt-0.5">Stock: {item.cantidad}</p>
                   </div>
                   <div className="text-right shrink-0 pl-3">
                     <p className="text-orange-500 font-black text-base">{formatARS(item.precio_venta)}</p>
+                    <p className="text-zinc-600 text-xs">precio venta</p>
                   </div>
                 </button>
               ))}
