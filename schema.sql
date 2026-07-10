@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS trabajos (
   ganancia_neta    NUMERIC DEFAULT 0,
   estado           VARCHAR DEFAULT 'En Taller',
   metodo_pago      VARCHAR DEFAULT 'Efectivo',
-  informe_final    TEXT
+  informe_final    TEXT,
+  repuestos_jsonb  JSONB DEFAULT '[]'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS inventario (
@@ -48,9 +49,10 @@ CREATE TABLE IF NOT EXISTS caja_movimientos (
 
 -- Columnas nuevas sobre tablas existentes (idempotente)
 ALTER TABLE clientes  ADD COLUMN IF NOT EXISTS dni          VARCHAR;
-ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS estado       VARCHAR DEFAULT 'En Taller';
-ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS metodo_pago  VARCHAR DEFAULT 'Efectivo';
-ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS informe_final TEXT;
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS estado          VARCHAR DEFAULT 'En Taller';
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS metodo_pago     VARCHAR DEFAULT 'Efectivo';
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS informe_final   TEXT;
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS repuestos_jsonb JSONB DEFAULT '[]'::jsonb;
 
 -- Habilitar RLS
 ALTER TABLE clientes         ENABLE ROW LEVEL SECURITY;

@@ -149,6 +149,7 @@ export default function Ordenes() {
         ganancia_neta: 0,
         estado: 'En Taller',
         metodo_pago: 'Efectivo',
+        repuestos_jsonb: repuestosNuevo,
       })
       if (error) throw error
       await decrementarStock(repuestosNuevo)
@@ -197,6 +198,7 @@ export default function Ordenes() {
         ganancia_neta: ganancia,
         metodo_pago: entregaForm.metodo_pago,
         informe_final: entregaForm.informe_final.trim() || null,
+        repuestos_jsonb: repuestosEntrega,
       })
       .eq('id', id)
 

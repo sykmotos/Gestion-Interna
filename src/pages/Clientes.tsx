@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatARS, formatFecha } from '../lib/utils'
 import type { Cliente, Trabajo } from '../types'
-import { ChevronDown, ChevronUp, MessageCircle } from 'lucide-react'
+import { ChevronDown, ChevronUp, MessageCircle, Pencil } from 'lucide-react'
+import EditClienteModal from '../components/EditClienteModal'
 
 export default function Clientes() {
   const [query, setQuery] = useState('')
@@ -10,6 +11,7 @@ export default function Clientes() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [historiales, setHistoriales] = useState<Record<string, Trabajo[]>>({})
   const [loading, setLoading] = useState(false)
+  const [editCliente, setEditCliente] = useState<Cliente | null>(null)
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -95,6 +97,12 @@ export default function Clientes() {
                     <MessageCircle size={18} />
                   </a>
                 )}
+                <button
+                  onClick={e => { e.stopPropagation(); setEditCliente(c) }}
+                  className="bg-zinc-800 border border-zinc-700 p-2.5 rounded-xl text-zinc-400 active:bg-zinc-700"
+                >
+                  <Pencil size={16} />
+                </button>
                 {expandedId === c.patente ? (
                   <ChevronUp size={20} className="text-zinc-600" />
                 ) : (
@@ -168,6 +176,17 @@ export default function Clientes() {
           </p>
         )}
       </div>
+
+      {editCliente && (
+        <EditClienteModal
+          cliente={editCliente}
+          onClose={() => setEditCliente(null)}
+          onSaved={updated => {
+            setClientes(prev => prev.map(c => (c.patente === updated.patente ? updated : c)))
+            setEditCliente(null)
+          }}
+        />
+      )}
     </div>
   )
 }

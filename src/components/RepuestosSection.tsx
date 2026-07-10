@@ -245,3 +245,29 @@ export async function decrementarStock(repuestos: RepuestoItem[]) {
     }
   }
 }
+
+/** Devuelve stock en Supabase para los items de tipo 'stock' (inversa de decrementarStock) */
+export async function incrementarStock(repuestos: RepuestoItem[]) {
+  const counts = new Map<string, number>()
+  for (const item of repuestos) {
+    if (item.type === 'stock' && item.inventario_id) {
+      counts.set(item.inventario_id, (counts.get(item.inventario_id) ?? 0) + 1)
+    }
+  }
+  for (const [id, qty] of counts) {
+    const { data } = await supabase
+      .from('inventario')
+      .select('cantidad')
+      .eq('id', id)
+      .single()
+    if (data) {
+      await supabase
+        .from('inventario')
+        .update({
+          cantidad: data.cantidad + qty,
+          ultima_actualizacion: new Date().toISOString(),
+        })
+        .eq('id', id)
+    }
+  }
+}

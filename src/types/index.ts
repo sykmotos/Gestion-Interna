@@ -19,6 +19,7 @@ export interface Trabajo {
   estado: string
   metodo_pago: string
   informe_final: string | null
+  repuestos_jsonb: object[] | null
 }
 
 export interface Inventario {
