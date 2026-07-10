@@ -17,7 +17,7 @@ export default function Clientes() {
       let q = supabase.from('clientes').select('*').order('nombre_dueño')
 
       if (query.length >= 2) {
-        q = q.or(`patente.ilike.%${query}%,nombre_dueño.ilike.%${query}%`)
+        q = q.or(`patente.ilike.%${query}%,nombre_dueño.ilike.%${query}%,dni.ilike.%${query}%`)
       } else {
         q = q.limit(20)
       }
@@ -79,6 +79,9 @@ export default function Clientes() {
                   {c.nombre_dueño ?? '—'}
                 </p>
                 <p className="text-zinc-500 text-sm">{c.modelo_moto ?? ''}</p>
+                {c.dni && (
+                  <p className="text-zinc-600 text-xs">DNI {c.dni}</p>
+                )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {c.telefono && (
@@ -125,6 +128,11 @@ export default function Clientes() {
                             {t.repuestos_usados && (
                               <p className="text-zinc-500 text-xs mt-0.5">
                                 Rep: {t.repuestos_usados}
+                              </p>
+                            )}
+                            {t.informe_final && (
+                              <p className="text-zinc-400 text-xs mt-0.5 italic">
+                                {t.informe_final}
                               </p>
                             )}
                             <div className="flex items-center gap-2 mt-1">

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatARS, formatFecha } from '../lib/utils'
 import type { Cliente, Trabajo } from '../types'
@@ -6,6 +6,8 @@ import RepuestosSection, {
   type RepuestoItem,
   decrementarStock,
 } from '../components/RepuestosSection'
+import EditTrabajoModal from '../components/EditTrabajoModal'
+import { Search, Pencil } from 'lucide-react'
 
 const ESTADOS = ['En Taller', 'Terminado', 'Entregado'] as const
 const METODOS_PAGO = ['Efectivo', 'Transferencia', 'Débito', 'Crédito']
@@ -16,6 +18,7 @@ const inp =
 interface EntregaForm {
   precio_cobrado: string
   metodo_pago: string
+  informe_final: string
 }
 
 function estadoBadge(estado: string) {
@@ -31,6 +34,7 @@ export default function Ordenes() {
   const [patente, setPatente] = useState('')
   const [nombreDueño, setNombreDueño] = useState('')
   const [telefono, setTelefono] = useState('')
+  const [dni, setDni] = useState('')
   const [modeloMoto, setModeloMoto] = useState('')
   const [fallaDec, setFallaDec] = useState('')
   const [repuestosNuevo, setRepuestosNuevo] = useState<RepuestoItem[]>([])
@@ -40,13 +44,17 @@ export default function Ordenes() {
 
   // — Ver todas —
   const [trabajos, setTrabajos] = useState<Trabajo[]>([])
+  const [clienteMap, setClienteMap] = useState<Record<string, Cliente>>({})
   const [loadingTrabajos, setLoadingTrabajos] = useState(false)
+  const [search, setSearch] = useState('')
   const [pendienteEntrega, setPendienteEntrega] = useState<string | null>(null)
   const [repuestosEntrega, setRepuestosEntrega] = useState<RepuestoItem[]>([])
   const [entregaForm, setEntregaForm] = useState<EntregaForm>({
     precio_cobrado: '',
     metodo_pago: 'Efectivo',
+    informe_final: '',
   })
+  const [editTrabajo, setEditTrabajo] = useState<Trabajo | null>(null)
 
   // Autocomplete patente
   useEffect(() => {
@@ -66,6 +74,7 @@ export default function Ordenes() {
         const c = data as Cliente
         setNombreDueño(c.nombre_dueño ?? '')
         setTelefono(c.telefono ?? '')
+        setDni(c.dni ?? '')
         setModeloMoto(c.modelo_moto ?? '')
         setClienteStatus('existente')
       } else {
@@ -77,11 +86,16 @@ export default function Ordenes() {
 
   const loadTrabajos = async () => {
     setLoadingTrabajos(true)
-    const { data } = await supabase
-      .from('trabajos')
-      .select('*')
-      .order('fecha', { ascending: false })
-    if (data) setTrabajos(data as Trabajo[])
+    const [{ data: tData }, { data: cData }] = await Promise.all([
+      supabase.from('trabajos').select('*').order('fecha', { ascending: false }),
+      supabase.from('clientes').select('*'),
+    ])
+    if (tData) setTrabajos(tData as Trabajo[])
+    if (cData) {
+      const map: Record<string, Cliente> = {}
+      for (const c of cData as Cliente[]) map[c.patente] = c
+      setClienteMap(map)
+    }
     setLoadingTrabajos(false)
   }
 
@@ -89,10 +103,25 @@ export default function Ordenes() {
     if (tab === 'todas') loadTrabajos()
   }, [tab])
 
+  const trabajosFiltrados = useMemo(() => {
+    if (!search.trim()) return trabajos
+    const q = search.toLowerCase()
+    return trabajos.filter(t => {
+      const c = clienteMap[t.patente_id]
+      return (
+        t.patente_id.toLowerCase().includes(q) ||
+        c?.nombre_dueño?.toLowerCase().includes(q) ||
+        c?.dni?.toLowerCase().includes(q) ||
+        c?.modelo_moto?.toLowerCase().includes(q)
+      )
+    })
+  }, [trabajos, clienteMap, search])
+
   const resetNuevo = () => {
     setPatente('')
     setNombreDueño('')
     setTelefono('')
+    setDni('')
     setModeloMoto('')
     setFallaDec('')
     setRepuestosNuevo([])
@@ -108,7 +137,7 @@ export default function Ordenes() {
       await supabase
         .from('clientes')
         .upsert(
-          { patente, nombre_dueño: nombreDueño, telefono, modelo_moto: modeloMoto },
+          { patente, nombre_dueño: nombreDueño, telefono, dni: dni || null, modelo_moto: modeloMoto },
           { onConflict: 'patente' },
         )
       const { error } = await supabase.from('trabajos').insert({
@@ -137,7 +166,7 @@ export default function Ordenes() {
     if (nuevoEstado === 'Entregado') {
       setPendienteEntrega(id)
       setRepuestosEntrega([])
-      setEntregaForm({ precio_cobrado: '', metodo_pago: 'Efectivo' })
+      setEntregaForm({ precio_cobrado: '', metodo_pago: 'Efectivo', informe_final: '' })
       return
     }
     const { error } = await supabase
@@ -150,10 +179,13 @@ export default function Ordenes() {
   }
 
   const confirmarEntrega = async (id: string) => {
+    const t = trabajos.find(w => w.id === id)
     const costo = repuestosEntrega.reduce((s, i) => s + i.costo, 0)
     const precio = parseFloat(entregaForm.precio_cobrado) || 0
     const ganancia = precio - costo
     const repuestosStr = repuestosEntrega.map(r => r.nombre).join(', ')
+    const cliente = clienteMap[t?.patente_id ?? '']
+    const nombreCliente = cliente?.nombre_dueño ?? t?.patente_id ?? ''
 
     const { error } = await supabase
       .from('trabajos')
@@ -164,24 +196,35 @@ export default function Ordenes() {
         precio_cobrado: precio,
         ganancia_neta: ganancia,
         metodo_pago: entregaForm.metodo_pago,
+        informe_final: entregaForm.informe_final.trim() || null,
       })
       .eq('id', id)
 
     if (!error) {
-      await decrementarStock(repuestosEntrega)
+      await Promise.all([
+        decrementarStock(repuestosEntrega),
+        supabase.from('caja_movimientos').insert({
+          tipo: 'ingreso',
+          concepto: `Entrega: ${nombreCliente} (${t?.patente_id ?? ''})`,
+          monto: precio,
+          metodo_pago: entregaForm.metodo_pago,
+          trabajo_id: id,
+        }),
+      ])
       setTrabajos(prev =>
-        prev.map(t =>
-          t.id === id
+        prev.map(w =>
+          w.id === id
             ? {
-                ...t,
+                ...w,
                 estado: 'Entregado',
                 repuestos_usados: repuestosStr,
                 costo_repuestos: costo,
                 precio_cobrado: precio,
                 ganancia_neta: ganancia,
                 metodo_pago: entregaForm.metodo_pago,
+                informe_final: entregaForm.informe_final.trim() || null,
               }
-            : t,
+            : w,
         ),
       )
       setPendienteEntrega(null)
@@ -258,6 +301,20 @@ export default function Ordenes() {
 
           <div>
             <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
+              DNI
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={dni}
+              onChange={e => setDni(e.target.value.replace(/\D/g, ''))}
+              placeholder="12345678"
+              className={`${inp} text-xl`}
+            />
+          </div>
+
+          <div>
+            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
               Teléfono
             </label>
             <input
@@ -311,19 +368,38 @@ export default function Ordenes() {
       {/* ── Tab: Ver Todas ── */}
       {tab === 'todas' && (
         <div className="space-y-3">
+          {/* Buscador */}
+          <div className="relative mb-1">
+            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar por patente, nombre, DNI, modelo..."
+              className="w-full bg-zinc-900 border border-zinc-700 focus:border-orange-500 text-zinc-100 py-4 pl-11 pr-4 rounded-xl outline-none placeholder:text-zinc-600 transition-colors"
+            />
+          </div>
+
           {loadingTrabajos && (
             <p className="text-zinc-600 text-center py-8 text-sm font-bold tracking-widest">
               CARGANDO...
             </p>
           )}
 
-          {trabajos.map(t => (
+          {trabajosFiltrados.map(t => (
             <div key={t.id} className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
               {/* Cabecera */}
               <div className="p-4">
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div className="flex-1 min-w-0">
-                    <p className="text-orange-500 font-black text-xl tracking-widest">{t.patente_id}</p>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="text-orange-500 font-black text-xl tracking-widest">{t.patente_id}</p>
+                      {clienteMap[t.patente_id]?.nombre_dueño && (
+                        <p className="text-zinc-400 text-sm font-bold truncate">
+                          {clienteMap[t.patente_id].nombre_dueño}
+                        </p>
+                      )}
+                    </div>
                     <p className="text-zinc-400 text-sm mt-0.5 line-clamp-2">
                       {t.detalle_trabajo || '—'}
                     </p>
@@ -332,20 +408,34 @@ export default function Ordenes() {
                         Rep: {t.repuestos_usados}
                       </p>
                     )}
+                    {t.informe_final && (
+                      <p className="text-zinc-500 text-xs mt-0.5 line-clamp-2 italic">
+                        Informe: {t.informe_final}
+                      </p>
+                    )}
                     <p className="text-zinc-600 text-xs mt-1">{formatFecha(t.fecha)}</p>
                   </div>
 
-                  <select
-                    value={t.estado || 'En Taller'}
-                    onChange={e => cambiarEstado(t.id, e.target.value)}
-                    className={`text-xs font-bold py-2 px-3 rounded-lg outline-none border shrink-0 bg-transparent cursor-pointer ${estadoBadge(t.estado || 'En Taller')}`}
-                  >
-                    {ESTADOS.map(e => (
-                      <option key={e} value={e} className="bg-zinc-900 text-zinc-100">
-                        {e}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    <select
+                      value={t.estado || 'En Taller'}
+                      onChange={e => cambiarEstado(t.id, e.target.value)}
+                      className={`text-xs font-bold py-2 px-3 rounded-lg outline-none border bg-transparent cursor-pointer ${estadoBadge(t.estado || 'En Taller')}`}
+                    >
+                      {ESTADOS.map(e => (
+                        <option key={e} value={e} className="bg-zinc-900 text-zinc-100">
+                          {e}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => setEditTrabajo(t)}
+                      className="flex items-center gap-1 text-zinc-500 text-xs font-bold py-1.5 px-3 bg-zinc-800 rounded-lg border border-zinc-700 active:bg-zinc-700"
+                    >
+                      <Pencil size={13} />
+                      EDITAR
+                    </button>
+                  </div>
                 </div>
 
                 {t.estado === 'Entregado' && t.precio_cobrado > 0 && (
@@ -365,7 +455,6 @@ export default function Ordenes() {
                     Cerrar orden — Repuestos y cobro
                   </p>
 
-                  {/* Repuestos con descuento automático de stock */}
                   <RepuestosSection
                     items={repuestosEntrega}
                     onChange={setRepuestosEntrega}
@@ -394,6 +483,19 @@ export default function Ordenes() {
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </select>
+
+                  <div>
+                    <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
+                      Informe Final (opcional)
+                    </label>
+                    <textarea
+                      value={entregaForm.informe_final}
+                      onChange={e => setEntregaForm(f => ({ ...f, informe_final: e.target.value }))}
+                      placeholder="¿Qué se hizo? Diagnóstico, repuestos cambiados..."
+                      rows={3}
+                      className={`${inp} resize-none`}
+                    />
+                  </div>
 
                   {/* Preview de ganancia */}
                   {entregaForm.precio_cobrado && (
@@ -431,10 +533,24 @@ export default function Ordenes() {
             </div>
           ))}
 
-          {!loadingTrabajos && trabajos.length === 0 && (
-            <p className="text-zinc-700 text-center py-10 text-sm">Sin órdenes registradas</p>
+          {!loadingTrabajos && trabajosFiltrados.length === 0 && (
+            <p className="text-zinc-700 text-center py-10 text-sm">
+              {search ? 'Sin resultados para esa búsqueda' : 'Sin órdenes registradas'}
+            </p>
           )}
         </div>
+      )}
+
+      {/* Edit modal */}
+      {editTrabajo && (
+        <EditTrabajoModal
+          trabajo={editTrabajo}
+          onClose={() => setEditTrabajo(null)}
+          onSaved={updated => {
+            setTrabajos(prev => prev.map(t => (t.id === updated.id ? updated : t)))
+            setEditTrabajo(null)
+          }}
+        />
       )}
     </div>
   )

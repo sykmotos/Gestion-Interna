@@ -4,6 +4,7 @@ export interface Cliente {
   nombre_dueño: string
   telefono: string
   modelo_moto: string
+  dni: string | null
 }
 
 export interface Trabajo {
@@ -17,6 +18,7 @@ export interface Trabajo {
   ganancia_neta: number
   estado: string
   metodo_pago: string
+  informe_final: string | null
 }
 
 export interface Inventario {
@@ -27,4 +29,14 @@ export interface Inventario {
   precio_costo: number
   precio_venta: number
   ultima_actualizacion: string
+}
+
+export interface CajaMovimiento {
+  id: string
+  fecha: string
+  tipo: 'ingreso' | 'egreso' | 'cierre'
+  concepto: string
+  monto: number
+  metodo_pago: string
+  trabajo_id: string | null
 }

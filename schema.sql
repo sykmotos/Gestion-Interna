@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS clientes (
   nombre_dueño VARCHAR,
   telefono     VARCHAR,
   modelo_moto  VARCHAR,
+  dni          VARCHAR,
   created_at   TIMESTAMP DEFAULT NOW()
 );
 
@@ -21,7 +22,8 @@ CREATE TABLE IF NOT EXISTS trabajos (
   precio_cobrado   NUMERIC DEFAULT 0,
   ganancia_neta    NUMERIC DEFAULT 0,
   estado           VARCHAR DEFAULT 'En Taller',
-  metodo_pago      VARCHAR DEFAULT 'Efectivo'
+  metodo_pago      VARCHAR DEFAULT 'Efectivo',
+  informe_final    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS inventario (
@@ -34,28 +36,39 @@ CREATE TABLE IF NOT EXISTS inventario (
   ultima_actualizacion TIMESTAMP DEFAULT NOW()
 );
 
--- Agregar columnas nuevas si la tabla trabajos ya existía
-ALTER TABLE trabajos ADD COLUMN IF NOT EXISTS estado VARCHAR DEFAULT 'En Taller';
-ALTER TABLE trabajos ADD COLUMN IF NOT EXISTS metodo_pago VARCHAR DEFAULT 'Efectivo';
+CREATE TABLE IF NOT EXISTS caja_movimientos (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  fecha       TIMESTAMP DEFAULT NOW(),
+  tipo        VARCHAR NOT NULL,
+  concepto    TEXT NOT NULL,
+  monto       NUMERIC DEFAULT 0,
+  metodo_pago VARCHAR DEFAULT 'Efectivo',
+  trabajo_id  UUID REFERENCES trabajos(id) NULL
+);
+
+-- Columnas nuevas sobre tablas existentes (idempotente)
+ALTER TABLE clientes  ADD COLUMN IF NOT EXISTS dni          VARCHAR;
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS estado       VARCHAR DEFAULT 'En Taller';
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS metodo_pago  VARCHAR DEFAULT 'Efectivo';
+ALTER TABLE trabajos  ADD COLUMN IF NOT EXISTS informe_final TEXT;
 
 -- Habilitar RLS
-ALTER TABLE clientes  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE trabajos  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE inventario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE clientes         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trabajos         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inventario       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE caja_movimientos ENABLE ROW LEVEL SECURITY;
 
--- Políticas públicas (sin auth requerida)
+-- Políticas públicas
 DROP POLICY IF EXISTS "clientes_public_all"   ON clientes;
 DROP POLICY IF EXISTS "trabajos_public_all"   ON trabajos;
 DROP POLICY IF EXISTS "inventario_public_all" ON inventario;
+DROP POLICY IF EXISTS "caja_public_all"       ON caja_movimientos;
 
 CREATE POLICY "clientes_public_all"
-  ON clientes FOR ALL TO anon, authenticated
-  USING (true) WITH CHECK (true);
-
+  ON clientes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "trabajos_public_all"
-  ON trabajos FOR ALL TO anon, authenticated
-  USING (true) WITH CHECK (true);
-
+  ON trabajos FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "inventario_public_all"
-  ON inventario FOR ALL TO anon, authenticated
-  USING (true) WITH CHECK (true);
+  ON inventario FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "caja_public_all"
+  ON caja_movimientos FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
