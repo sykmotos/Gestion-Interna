@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatARS, formatFecha } from '../lib/utils'
 import type { Cliente, Trabajo } from '../types'
+import RepuestosSection, {
+  type RepuestoItem,
+  decrementarStock,
+} from '../components/RepuestosSection'
 
 const ESTADOS = ['En Taller', 'Terminado', 'Entregado'] as const
 const METODOS_PAGO = ['Efectivo', 'Transferencia', 'Débito', 'Crédito']
@@ -10,7 +14,6 @@ const inp =
   'w-full bg-zinc-800 border border-zinc-700 focus:border-orange-500 text-zinc-100 py-4 px-4 rounded-xl outline-none placeholder:text-zinc-600 transition-colors'
 
 interface EntregaForm {
-  costo_repuestos: string
   precio_cobrado: string
   metodo_pago: string
 }
@@ -30,6 +33,7 @@ export default function Ordenes() {
   const [telefono, setTelefono] = useState('')
   const [modeloMoto, setModeloMoto] = useState('')
   const [fallaDec, setFallaDec] = useState('')
+  const [repuestosNuevo, setRepuestosNuevo] = useState<RepuestoItem[]>([])
   const [buscando, setBuscando] = useState(false)
   const [clienteStatus, setClienteStatus] = useState<'existente' | 'nuevo' | null>(null)
   const [guardando, setGuardando] = useState(false)
@@ -38,8 +42,8 @@ export default function Ordenes() {
   const [trabajos, setTrabajos] = useState<Trabajo[]>([])
   const [loadingTrabajos, setLoadingTrabajos] = useState(false)
   const [pendienteEntrega, setPendienteEntrega] = useState<string | null>(null)
+  const [repuestosEntrega, setRepuestosEntrega] = useState<RepuestoItem[]>([])
   const [entregaForm, setEntregaForm] = useState<EntregaForm>({
-    costo_repuestos: '',
     precio_cobrado: '',
     metodo_pago: 'Efectivo',
   })
@@ -91,8 +95,11 @@ export default function Ordenes() {
     setTelefono('')
     setModeloMoto('')
     setFallaDec('')
+    setRepuestosNuevo([])
     setClienteStatus(null)
   }
+
+  const costoNuevo = repuestosNuevo.reduce((s, i) => s + i.costo, 0)
 
   const guardarIngreso = async () => {
     if (!patente || guardando) return
@@ -107,14 +114,15 @@ export default function Ordenes() {
       const { error } = await supabase.from('trabajos').insert({
         patente_id: patente,
         detalle_trabajo: fallaDec,
-        repuestos_usados: '',
-        costo_repuestos: 0,
+        repuestos_usados: repuestosNuevo.map(r => r.nombre).join(', '),
+        costo_repuestos: costoNuevo,
         precio_cobrado: 0,
         ganancia_neta: 0,
         estado: 'En Taller',
         metodo_pago: 'Efectivo',
       })
       if (error) throw error
+      await decrementarStock(repuestosNuevo)
       resetNuevo()
       setTab('todas')
     } catch (err) {
@@ -128,7 +136,8 @@ export default function Ordenes() {
   const cambiarEstado = async (id: string, nuevoEstado: string) => {
     if (nuevoEstado === 'Entregado') {
       setPendienteEntrega(id)
-      setEntregaForm({ costo_repuestos: '', precio_cobrado: '', metodo_pago: 'Efectivo' })
+      setRepuestosEntrega([])
+      setEntregaForm({ precio_cobrado: '', metodo_pago: 'Efectivo' })
       return
     }
     const { error } = await supabase
@@ -141,24 +150,37 @@ export default function Ordenes() {
   }
 
   const confirmarEntrega = async (id: string) => {
-    const costo = parseFloat(entregaForm.costo_repuestos) || 0
+    const costo = repuestosEntrega.reduce((s, i) => s + i.costo, 0)
     const precio = parseFloat(entregaForm.precio_cobrado) || 0
     const ganancia = precio - costo
+    const repuestosStr = repuestosEntrega.map(r => r.nombre).join(', ')
+
     const { error } = await supabase
       .from('trabajos')
       .update({
         estado: 'Entregado',
+        repuestos_usados: repuestosStr,
         costo_repuestos: costo,
         precio_cobrado: precio,
         ganancia_neta: ganancia,
         metodo_pago: entregaForm.metodo_pago,
       })
       .eq('id', id)
+
     if (!error) {
+      await decrementarStock(repuestosEntrega)
       setTrabajos(prev =>
         prev.map(t =>
           t.id === id
-            ? { ...t, estado: 'Entregado', costo_repuestos: costo, precio_cobrado: precio, ganancia_neta: ganancia, metodo_pago: entregaForm.metodo_pago }
+            ? {
+                ...t,
+                estado: 'Entregado',
+                repuestos_usados: repuestosStr,
+                costo_repuestos: costo,
+                precio_cobrado: precio,
+                ganancia_neta: ganancia,
+                metodo_pago: entregaForm.metodo_pago,
+              }
             : t,
         ),
       )
@@ -273,6 +295,9 @@ export default function Ordenes() {
             />
           </div>
 
+          {/* Repuestos */}
+          <RepuestosSection items={repuestosNuevo} onChange={setRepuestosNuevo} />
+
           <button
             onClick={guardarIngreso}
             disabled={!patente || guardando}
@@ -294,20 +319,22 @@ export default function Ordenes() {
 
           {trabajos.map(t => (
             <div key={t.id} className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-              {/* Cabecera de la tarjeta */}
+              {/* Cabecera */}
               <div className="p-4">
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div className="flex-1 min-w-0">
-                    <p className="text-orange-500 font-black text-xl tracking-widest">
-                      {t.patente_id}
-                    </p>
+                    <p className="text-orange-500 font-black text-xl tracking-widest">{t.patente_id}</p>
                     <p className="text-zinc-400 text-sm mt-0.5 line-clamp-2">
                       {t.detalle_trabajo || '—'}
                     </p>
+                    {t.repuestos_usados && (
+                      <p className="text-zinc-600 text-xs mt-0.5 line-clamp-1">
+                        Rep: {t.repuestos_usados}
+                      </p>
+                    )}
                     <p className="text-zinc-600 text-xs mt-1">{formatFecha(t.fecha)}</p>
                   </div>
 
-                  {/* Estado select */}
                   <select
                     value={t.estado || 'En Taller'}
                     onChange={e => cambiarEstado(t.id, e.target.value)}
@@ -321,12 +348,9 @@ export default function Ordenes() {
                   </select>
                 </div>
 
-                {/* Resumen financiero si ya está entregado */}
                 {t.estado === 'Entregado' && t.precio_cobrado > 0 && (
                   <div className="flex justify-between items-center mt-2 pt-2 border-t border-zinc-800">
-                    <span className="text-zinc-500 text-xs">
-                      Cobrado: {formatARS(t.precio_cobrado)}
-                    </span>
+                    <span className="text-zinc-500 text-xs">Cobrado: {formatARS(t.precio_cobrado)}</span>
                     <span className="text-orange-500 text-xs font-bold">
                       Ganancia: {formatARS(t.ganancia_neta)}
                     </span>
@@ -334,51 +358,54 @@ export default function Ordenes() {
                 )}
               </div>
 
-              {/* Formulario de entrega inline */}
+              {/* Formulario de cierre de orden */}
               {pendienteEntrega === t.id && (
-                <div className="border-t border-zinc-800 bg-zinc-950 p-4 space-y-3">
+                <div className="border-t border-zinc-800 bg-zinc-950 p-4 space-y-4">
                   <p className="text-orange-500 text-xs font-black tracking-widest uppercase">
-                    Cerrar orden — Cargar montos
+                    Cerrar orden — Repuestos y cobro
                   </p>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={entregaForm.costo_repuestos}
-                    onChange={e =>
-                      setEntregaForm(f => ({ ...f, costo_repuestos: e.target.value }))
-                    }
-                    placeholder="Costo repuestos ($)"
-                    className={`${inp} text-xl`}
+
+                  {/* Repuestos con descuento automático de stock */}
+                  <RepuestosSection
+                    items={repuestosEntrega}
+                    onChange={setRepuestosEntrega}
                   />
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={entregaForm.precio_cobrado}
-                    onChange={e =>
-                      setEntregaForm(f => ({ ...f, precio_cobrado: e.target.value }))
-                    }
-                    placeholder="Precio cobrado al cliente ($)"
-                    className={`${inp} text-xl`}
-                  />
+
+                  <div>
+                    <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
+                      Precio Cobrado al Cliente ($)
+                    </label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={entregaForm.precio_cobrado}
+                      onChange={e => setEntregaForm(f => ({ ...f, precio_cobrado: e.target.value }))}
+                      placeholder="0"
+                      className={`${inp} text-2xl font-bold`}
+                    />
+                  </div>
+
                   <select
                     value={entregaForm.metodo_pago}
                     onChange={e => setEntregaForm(f => ({ ...f, metodo_pago: e.target.value }))}
                     className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 py-4 px-4 rounded-xl outline-none"
                   >
                     {METODOS_PAGO.map(m => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
+                      <option key={m} value={m}>{m}</option>
                     ))}
                   </select>
 
+                  {/* Preview de ganancia */}
                   {entregaForm.precio_cobrado && (
-                    <div className="bg-zinc-900 rounded-xl p-3 text-center">
-                      <span className="text-zinc-500 text-xs">Ganancia neta: </span>
-                      <span className="text-orange-500 font-black text-lg">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 flex justify-between items-center">
+                      <div>
+                        <p className="text-zinc-600 text-xs">Repuestos: {formatARS(repuestosEntrega.reduce((s, i) => s + i.costo, 0))}</p>
+                        <p className="text-zinc-500 text-xs font-bold">Ganancia neta</p>
+                      </div>
+                      <span className="text-orange-500 font-black text-xl">
                         {formatARS(
                           (parseFloat(entregaForm.precio_cobrado) || 0) -
-                            (parseFloat(entregaForm.costo_repuestos) || 0),
+                            repuestosEntrega.reduce((s, i) => s + i.costo, 0),
                         )}
                       </span>
                     </div>
