@@ -15,4 +15,16 @@ export interface Trabajo {
   costo_repuestos: number
   precio_cobrado: number
   ganancia_neta: number
+  estado: string
+  metodo_pago: string
+}
+
+export interface Inventario {
+  id: string
+  nombre: string
+  categoria: string | null
+  cantidad: number
+  precio_costo: number
+  precio_venta: number
+  ultima_actualizacion: string
 }
