@@ -27,6 +27,9 @@ alter table clientes enable row level security;
 alter table trabajos  enable row level security;
 
 -- Políticas públicas (sin auth requerida)
+drop policy if exists "clientes_public_all" on clientes;
+drop policy if exists "trabajos_public_all" on trabajos;
+
 create policy "clientes_public_all"
   on clientes for all to anon, authenticated
   using (true) with check (true);
