@@ -26,7 +26,7 @@ export default function EditTrabajoModal({ trabajo, onClose, onSaved }: Props) {
   const [kilometraje, setKilometraje] = useState(trabajo.kilometraje ?? '')
   const [estado, setEstado] = useState(trabajo.estado ?? 'En Taller')
   const [metodo, setMetodo] = useState(trabajo.metodo_pago ?? 'Efectivo')
-  const [precio, setPrecio] = useState(trabajo.precio_cobrado > 0 ? String(trabajo.precio_cobrado) : '')
+  const [manoDeObra, setManoDeObra] = useState(trabajo.mano_de_obra > 0 ? String(trabajo.mano_de_obra) : '')
   const [sena, setSena] = useState(trabajo.sena > 0 ? String(trabajo.sena) : '')
   const [informeFinal, setInformeFinal] = useState(trabajo.informe_final ?? '')
   const [repuestos, setRepuestos] = useState<RepuestoItem[]>(
@@ -36,11 +36,12 @@ export default function EditTrabajoModal({ trabajo, onClose, onSaved }: Props) {
 
   const repuestosOriginales = (trabajo.repuestos_jsonb ?? []) as RepuestoItem[]
 
-  const precioNum = parseFloat(precio) || 0
-  const senaNum = parseFloat(sena) || 0
   const nuevoCosto = repuestos.reduce((s, r) => s + r.costo, 0)
-  const nuevaGanancia = precioNum - nuevoCosto
-  const saldoPendiente = Math.max(0, precioNum - senaNum)
+  const manoDeObraNum = parseFloat(manoDeObra) || 0
+  const senaNum = parseFloat(sena) || 0
+  const totalCobrado = nuevoCosto + manoDeObraNum
+  const ganancia = manoDeObraNum
+  const saldoPendiente = Math.max(0, totalCobrado - senaNum)
 
   const guardar = async () => {
     if (guardando) return
@@ -56,10 +57,11 @@ export default function EditTrabajoModal({ trabajo, onClose, onSaved }: Props) {
       kilometraje: kilometraje.trim() || null,
       estado,
       metodo_pago: metodo,
-      precio_cobrado: precioNum,
+      mano_de_obra: manoDeObraNum,
+      precio_cobrado: totalCobrado,
       sena: senaNum,
       saldo_pendiente: saldoPendiente,
-      ganancia_neta: nuevaGanancia,
+      ganancia_neta: ganancia,
       informe_final: informeFinal.trim() || null,
       repuestos_usados: repuestos.map(r => r.nombre).join(', '),
       costo_repuestos: nuevoCosto,
@@ -122,61 +124,70 @@ export default function EditTrabajoModal({ trabajo, onClose, onSaved }: Props) {
         {/* Repuestos con diff de stock */}
         <RepuestosSection items={repuestos} onChange={setRepuestos} />
 
-        {/* Precio cobrado */}
-        <div>
-          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Precio Cobrado ($)</label>
-          <input
-            type="number"
-            inputMode="decimal"
-            value={precio}
-            onChange={e => setPrecio(e.target.value)}
-            placeholder="0"
-            className={`${inp} text-2xl font-bold`}
-          />
-        </div>
+        {/* ── Bloque financiero ── */}
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
+          <p className="text-zinc-500 text-xs font-bold tracking-widest uppercase">Cobro</p>
 
-        {/* Seña */}
-        <div>
-          <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">Seña / Adelanto ($)</label>
-          <input
-            type="number"
-            inputMode="decimal"
-            value={sena}
-            onChange={e => setSena(e.target.value)}
-            placeholder="0"
-            className={`${inp} text-2xl font-bold`}
-          />
-        </div>
+          <div>
+            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
+              Mano de Obra ($)
+            </label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={manoDeObra}
+              onChange={e => setManoDeObra(e.target.value)}
+              placeholder="$0"
+              className={`${inp} text-2xl font-bold`}
+            />
+          </div>
 
-        {/* Panel financiero */}
-        {(precioNum > 0 || repuestos.length > 0) && (
-          <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-3 space-y-1.5">
-            <div className="flex justify-between text-xs">
-              <span className="text-zinc-500">Costo repuestos</span>
-              <span className="text-zinc-300">{formatARS(nuevoCosto)}</span>
-            </div>
-            {senaNum > 0 && (
-              <div className="flex justify-between text-xs">
-                <span className="text-yellow-500 font-bold">Seña</span>
-                <span className="text-yellow-500 font-bold">{formatARS(senaNum)}</span>
-              </div>
-            )}
-            {precioNum > 0 && senaNum > 0 && (
-              <div className="flex justify-between text-xs">
-                <span className="text-zinc-400">Saldo pendiente</span>
-                <span className="text-zinc-300">{formatARS(saldoPendiente)}</span>
-              </div>
-            )}
-            {precioNum > 0 && (
-              <div className="flex justify-between border-t border-zinc-700 pt-1.5">
-                <span className="text-zinc-400 text-xs font-bold">Ganancia neta</span>
-                <span className={`font-black text-lg ${nuevaGanancia >= 0 ? 'text-orange-500' : 'text-red-400'}`}>
-                  {formatARS(nuevaGanancia)}
+          <div>
+            <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
+              Seña / Adelanto ($)
+            </label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={sena}
+              onChange={e => setSena(e.target.value)}
+              placeholder="$0"
+              className={`${inp} text-2xl font-bold`}
+            />
+          </div>
+
+          {/* Resumen financiero */}
+          {(totalCobrado > 0 || senaNum > 0) && (
+            <div className="border-t border-zinc-800 pt-3 space-y-1.5">
+              {nuevoCosto > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Repuestos</span>
+                  <span className="text-zinc-300">{formatARS(nuevoCosto)}</span>
+                </div>
+              )}
+              {manoDeObraNum > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Mano de obra</span>
+                  <span className="text-zinc-300">{formatARS(manoDeObraNum)}</span>
+                </div>
+              )}
+              {senaNum > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-yellow-500 font-bold">Seña</span>
+                  <span className="text-yellow-500 font-bold">-{formatARS(senaNum)}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center border-t border-zinc-700 pt-2 mt-1">
+                <span className="text-zinc-300 font-black text-sm uppercase tracking-wide">
+                  Saldo Pendiente
+                </span>
+                <span className="text-orange-500 font-black text-2xl">
+                  {formatARS(saldoPendiente)}
                 </span>
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
 
         {/* Estado */}
         <div>

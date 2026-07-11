@@ -16,7 +16,7 @@ const inp =
   'w-full bg-zinc-800 border border-zinc-700 focus:border-orange-500 text-zinc-100 py-4 px-4 rounded-xl outline-none placeholder:text-zinc-600 transition-colors'
 
 interface EntregaForm {
-  precio_cobrado: string
+  mano_de_obra: string
   metodo_pago: string
   informe_final: string
 }
@@ -45,6 +45,7 @@ export default function Ordenes() {
   const [modeloMoto, setModeloMoto] = useState('')
   const [fallaDec, setFallaDec] = useState('')
   const [kilometraje, setKilometraje] = useState('')
+  const [manoDeObra, setManoDeObra] = useState('')
   const [sena, setSena] = useState('')
   const [repuestosNuevo, setRepuestosNuevo] = useState<RepuestoItem[]>([])
   const [buscando, setBuscando] = useState(false)
@@ -59,7 +60,7 @@ export default function Ordenes() {
   const [pendienteEntrega, setPendienteEntrega] = useState<string | null>(null)
   const [repuestosEntrega, setRepuestosEntrega] = useState<RepuestoItem[]>([])
   const [entregaForm, setEntregaForm] = useState<EntregaForm>({
-    precio_cobrado: '',
+    mano_de_obra: '',
     metodo_pago: 'Efectivo',
     informe_final: '',
   })
@@ -135,13 +136,17 @@ export default function Ordenes() {
     setModeloMoto('')
     setFallaDec('')
     setKilometraje('')
+    setManoDeObra('')
     setSena('')
     setRepuestosNuevo([])
     setClienteStatus(null)
   }
 
   const costoNuevo = repuestosNuevo.reduce((s, i) => s + i.costo, 0)
+  const manoDeObraNuevo = parseFloat(manoDeObra) || 0
   const senaNum = parseFloat(sena) || 0
+  const totalNuevo = costoNuevo + manoDeObraNuevo
+  const saldoNuevo = Math.max(0, totalNuevo - senaNum)
 
   const guardarIngreso = async () => {
     if (!patente || guardando) return
@@ -161,6 +166,7 @@ export default function Ordenes() {
           detalle_trabajo: fallaDec,
           repuestos_usados: repuestosNuevo.map(r => r.nombre).join(', '),
           costo_repuestos: costoNuevo,
+          mano_de_obra: manoDeObraNuevo,
           precio_cobrado: 0,
           ganancia_neta: 0,
           estado: 'En Taller',
@@ -168,7 +174,7 @@ export default function Ordenes() {
           repuestos_jsonb: repuestosNuevo,
           kilometraje: kilometraje.trim() || null,
           sena: senaNum,
-          saldo_pendiente: 0,
+          saldo_pendiente: saldoNuevo,
         })
         .select()
         .single()
@@ -204,7 +210,12 @@ export default function Ordenes() {
     if (nuevoEstado === 'Entregado') {
       setPendienteEntrega(id)
       setRepuestosEntrega([])
-      setEntregaForm({ precio_cobrado: '', metodo_pago: 'Efectivo', informe_final: '' })
+      const t = trabajos.find(w => w.id === id)
+      setEntregaForm({
+        mano_de_obra: t?.mano_de_obra ? String(t.mano_de_obra) : '',
+        metodo_pago: 'Efectivo',
+        informe_final: '',
+      })
       return
     }
     const { error } = await supabase
@@ -218,9 +229,10 @@ export default function Ordenes() {
 
   const confirmarEntrega = async (id: string) => {
     const t = trabajos.find(w => w.id === id)
-    const costo = repuestosEntrega.reduce((s, i) => s + i.costo, 0)
-    const precio = parseFloat(entregaForm.precio_cobrado) || 0
-    const ganancia = precio - costo
+    const costoRep = repuestosEntrega.reduce((s, i) => s + i.costo, 0)
+    const manoDeObraNum = parseFloat(entregaForm.mano_de_obra) || 0
+    const precio = costoRep + manoDeObraNum
+    const ganancia = manoDeObraNum  // ganancia = lo que cobra por mano de obra
     const repuestosStr = repuestosEntrega.map(r => r.nombre).join(', ')
     const cliente = clienteMap[t?.patente_id ?? '']
     const nombreCliente = cliente?.nombre_dueño ?? t?.patente_id ?? ''
@@ -234,7 +246,8 @@ export default function Ordenes() {
       .update({
         estado: 'Entregado',
         repuestos_usados: repuestosStr,
-        costo_repuestos: costo,
+        costo_repuestos: costoRep,
+        mano_de_obra: manoDeObraNum,
         precio_cobrado: precio,
         ganancia_neta: ganancia,
         metodo_pago: entregaForm.metodo_pago,
@@ -269,7 +282,8 @@ export default function Ordenes() {
                 ...w,
                 estado: 'Entregado',
                 repuestos_usados: repuestosStr,
-                costo_repuestos: costo,
+                costo_repuestos: costoRep,
+                mano_de_obra: manoDeObraNum,
                 precio_cobrado: precio,
                 ganancia_neta: ganancia,
                 metodo_pago: entregaForm.metodo_pago,
@@ -370,23 +384,73 @@ export default function Ordenes() {
 
           <RepuestosSection items={repuestosNuevo} onChange={setRepuestosNuevo} />
 
-          {/* Seña */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-1">
-            <label className="text-zinc-500 text-xs font-bold tracking-widest block uppercase">
-              Seña / Adelanto (opcional)
-            </label>
-            <input
-              type="number"
-              inputMode="decimal"
-              value={sena}
-              onChange={e => setSena(e.target.value)}
-              placeholder="$0"
-              className={`${inp} text-2xl font-bold`}
-            />
-            {senaNum > 0 && (
-              <p className="text-green-500 text-xs font-bold pt-1">
-                ✓ Se registrará {formatARS(senaNum)} en caja al guardar
-              </p>
+          {/* ── Bloque financiero ── */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
+            <p className="text-zinc-500 text-xs font-bold tracking-widest uppercase">Cobro</p>
+
+            <div>
+              <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
+                Mano de Obra ($)
+              </label>
+              <input
+                type="number"
+                inputMode="decimal"
+                value={manoDeObra}
+                onChange={e => setManoDeObra(e.target.value)}
+                placeholder="$0"
+                className={`${inp} text-2xl font-bold`}
+              />
+            </div>
+
+            <div>
+              <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
+                Seña / Adelanto ($)
+              </label>
+              <input
+                type="number"
+                inputMode="decimal"
+                value={sena}
+                onChange={e => setSena(e.target.value)}
+                placeholder="$0"
+                className={`${inp} text-2xl font-bold`}
+              />
+              {senaNum > 0 && (
+                <p className="text-green-500 text-xs font-bold pt-1">
+                  ✓ Se registrará {formatARS(senaNum)} en caja al guardar
+                </p>
+              )}
+            </div>
+
+            {/* Resumen financiero */}
+            {(costoNuevo > 0 || manoDeObraNuevo > 0 || senaNum > 0) && (
+              <div className="border-t border-zinc-800 pt-3 space-y-1.5">
+                {costoNuevo > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Repuestos</span>
+                    <span className="text-zinc-300">{formatARS(costoNuevo)}</span>
+                  </div>
+                )}
+                {manoDeObraNuevo > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Mano de obra</span>
+                    <span className="text-zinc-300">{formatARS(manoDeObraNuevo)}</span>
+                  </div>
+                )}
+                {senaNum > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-yellow-500 font-bold">Seña</span>
+                    <span className="text-yellow-500 font-bold">-{formatARS(senaNum)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center border-t border-zinc-700 pt-2 mt-1">
+                  <span className="text-zinc-300 font-black text-sm uppercase tracking-wide">
+                    Saldo Pendiente
+                  </span>
+                  <span className="text-orange-500 font-black text-2xl">
+                    {formatARS(saldoNuevo)}
+                  </span>
+                </div>
+              </div>
             )}
           </div>
 
@@ -484,19 +548,62 @@ export default function Ordenes() {
 
                   <RepuestosSection items={repuestosEntrega} onChange={setRepuestosEntrega} />
 
-                  <div>
-                    <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-                      Precio Total Cobrado ($)
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      value={entregaForm.precio_cobrado}
-                      onChange={e => setEntregaForm(f => ({ ...f, precio_cobrado: e.target.value }))}
-                      placeholder="0"
-                      className={`${inp} text-2xl font-bold`}
-                    />
-                  </div>
+                  {/* ── Bloque financiero entrega ── */}
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
+                    <p className="text-zinc-500 text-xs font-bold tracking-widest uppercase">Cobro</p>
+
+                    <div>
+                      <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
+                        Mano de Obra ($)
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={entregaForm.mano_de_obra}
+                        onChange={e => setEntregaForm(f => ({ ...f, mano_de_obra: e.target.value }))}
+                        placeholder="$0"
+                        className={`${inp} text-2xl font-bold`}
+                      />
+                    </div>
+
+                    {/* Resumen financiero entrega */}
+                    {(() => {
+                      const costoRepE = repuestosEntrega.reduce((s, i) => s + i.costo, 0)
+                      const manoE = parseFloat(entregaForm.mano_de_obra) || 0
+                      const totalE = costoRepE + manoE
+                      const senaE = t.sena ?? 0
+                      const saldoE = Math.max(0, totalE - senaE)
+                      return (totalE > 0 || senaE > 0) ? (
+                        <div className="border-t border-zinc-800 pt-3 space-y-1.5">
+                          {costoRepE > 0 && (
+                            <div className="flex justify-between text-sm">
+                              <span className="text-zinc-500">Repuestos</span>
+                              <span className="text-zinc-300">{formatARS(costoRepE)}</span>
+                            </div>
+                          )}
+                          {manoE > 0 && (
+                            <div className="flex justify-between text-sm">
+                              <span className="text-zinc-500">Mano de obra</span>
+                              <span className="text-zinc-300">{formatARS(manoE)}</span>
+                            </div>
+                          )}
+                          {senaE > 0 && (
+                            <div className="flex justify-between text-sm">
+                              <span className="text-yellow-500 font-bold">Seña ya cobrada</span>
+                              <span className="text-yellow-500 font-bold">-{formatARS(senaE)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center border-t border-zinc-700 pt-2 mt-1">
+                            <span className="text-zinc-300 font-black text-sm uppercase tracking-wide">
+                              {senaE > 0 ? 'Saldo a Cobrar' : 'Total a Cobrar'}
+                            </span>
+                            <span className="text-orange-500 font-black text-2xl">
+                              {formatARS(saldoE)}
+                            </span>
+                          </div>
+                        </div>
+                      ) : null
+                    })()}</div>
 
                   <select
                     value={entregaForm.metodo_pago}

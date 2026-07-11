@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatARS } from '../lib/utils'
 import type { Inventario } from '../types'
-import { Package, PenLine, Trash2, X, Pencil, Check } from 'lucide-react'
+import { Package, PenLine, Trash2, X } from 'lucide-react'
 
 export interface RepuestoItem {
   key: string
@@ -27,9 +27,6 @@ export default function RepuestosSection({ items, onChange }: Props) {
   const [loadingStock, setLoadingStock] = useState(false)
   const [manualNombre, setManualNombre] = useState('')
   const [manualCosto, setManualCosto] = useState('')
-  // Edición de precio inline
-  const [editingKey, setEditingKey] = useState<string | null>(null)
-  const [editingVal, setEditingVal] = useState('')
 
   const openStockModal = async () => {
     setShowStockModal(true)
@@ -75,16 +72,8 @@ export default function RepuestosSection({ items, onChange }: Props) {
 
   const remove = (key: string) => onChange(items.filter(i => i.key !== key))
 
-  const startEditPrice = (item: RepuestoItem) => {
-    setEditingKey(item.key)
-    setEditingVal(String(item.costo))
-  }
-
-  const commitEditPrice = (key: string) => {
-    const newPrice = parseFloat(editingVal) || 0
-    onChange(items.map(i => i.key === key ? { ...i, costo: newPrice } : i))
-    setEditingKey(null)
-  }
+  const updatePrecio = (key: string, val: string) =>
+    onChange(items.map(i => i.key === key ? { ...i, costo: parseFloat(val) || 0 } : i))
 
   const total = items.reduce((s, i) => s + i.costo, 0)
 
@@ -108,38 +97,18 @@ export default function RepuestosSection({ items, onChange }: Props) {
                 </p>
               </div>
 
-              {/* Precio editable inline */}
-              {editingKey === item.key ? (
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="text-zinc-500 text-sm">$</span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={editingVal}
-                    autoFocus
-                    onChange={e => setEditingVal(e.target.value)}
-                    onBlur={() => commitEditPrice(item.key)}
-                    onKeyDown={e => e.key === 'Enter' && commitEditPrice(item.key)}
-                    className="w-24 bg-zinc-700 border border-orange-500 text-orange-400 font-black py-1 px-2 rounded-lg outline-none text-sm text-right"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => commitEditPrice(item.key)}
-                    className="text-orange-500 p-1"
-                  >
-                    <Check size={15} />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => startEditPrice(item)}
-                  className="flex items-center gap-1 shrink-0 bg-zinc-700 border border-zinc-600 rounded-lg px-2.5 py-1.5 active:bg-zinc-600"
-                >
-                  <span className="text-orange-400 font-black text-sm">{formatARS(item.costo)}</span>
-                  <Pencil size={11} className="text-zinc-500" />
-                </button>
-              )}
+              {/* Precio siempre editable */}
+              <div className="flex items-center shrink-0 gap-1">
+                <span className="text-zinc-500 text-sm font-bold">$</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={item.costo || ''}
+                  onChange={e => updatePrecio(item.key, e.target.value)}
+                  placeholder="0"
+                  className="w-24 bg-zinc-700 border border-zinc-600 focus:border-orange-500 text-orange-400 font-black py-2 px-2 rounded-lg outline-none text-right text-base transition-colors"
+                />
+              </div>
 
               <button
                 type="button"
