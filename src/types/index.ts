@@ -22,6 +22,7 @@ export interface Trabajo {
   repuestos_jsonb: object[] | null
   kilometraje: string | null
   mano_de_obra: number
+  mano_obra_incluida: boolean
   sena: number
   saldo_pendiente: number
 }

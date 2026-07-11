@@ -46,6 +46,7 @@ export default function Ordenes() {
   const [fallaDec, setFallaDec] = useState('')
   const [kilometraje, setKilometraje] = useState('')
   const [manoDeObra, setManoDeObra] = useState('')
+  const [manoObraIncluida, setManoObraIncluida] = useState(false)
   const [sena, setSena] = useState('')
   const [repuestosNuevo, setRepuestosNuevo] = useState<RepuestoItem[]>([])
   const [buscando, setBuscando] = useState(false)
@@ -137,13 +138,14 @@ export default function Ordenes() {
     setFallaDec('')
     setKilometraje('')
     setManoDeObra('')
+    setManoObraIncluida(false)
     setSena('')
     setRepuestosNuevo([])
     setClienteStatus(null)
   }
 
   const costoNuevo = repuestosNuevo.reduce((s, i) => s + i.costo, 0)
-  const manoDeObraNuevo = parseFloat(manoDeObra) || 0
+  const manoDeObraNuevo = manoObraIncluida ? 0 : (parseFloat(manoDeObra) || 0)
   const senaNum = parseFloat(sena) || 0
   const totalNuevo = costoNuevo + manoDeObraNuevo
   const saldoNuevo = Math.max(0, totalNuevo - senaNum)
@@ -167,6 +169,7 @@ export default function Ordenes() {
           repuestos_usados: repuestosNuevo.map(r => r.nombre).join(', '),
           costo_repuestos: costoNuevo,
           mano_de_obra: manoDeObraNuevo,
+          mano_obra_incluida: manoObraIncluida,
           precio_cobrado: 0,
           ganancia_neta: 0,
           estado: 'En Taller',
@@ -382,16 +385,28 @@ export default function Ordenes() {
             <p className="text-zinc-500 text-xs font-bold tracking-widest uppercase">Cobro</p>
 
             <div>
-              <label className="text-zinc-500 text-xs font-bold tracking-widest block mb-1.5 uppercase">
-                Mano de Obra ($)
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-zinc-500 text-xs font-bold tracking-widest uppercase">
+                  Mano de Obra ($)
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={manoObraIncluida}
+                    onChange={e => setManoObraIncluida(e.target.checked)}
+                    className="w-4 h-4 accent-orange-500 cursor-pointer"
+                  />
+                  <span className="text-zinc-400 text-xs font-bold">Incluida en precio</span>
+                </label>
+              </div>
               <input
                 type="number"
                 inputMode="decimal"
-                value={manoDeObra}
+                value={manoObraIncluida ? '' : manoDeObra}
                 onChange={e => setManoDeObra(e.target.value)}
-                placeholder="$0"
-                className={`${inp} text-2xl font-bold`}
+                placeholder={manoObraIncluida ? 'Incluida' : '$0'}
+                disabled={manoObraIncluida}
+                className={`${inp} text-2xl font-bold ${manoObraIncluida ? 'opacity-40 cursor-not-allowed' : ''}`}
               />
             </div>
 
@@ -427,6 +442,12 @@ export default function Ordenes() {
                   <div className="flex justify-between text-sm">
                     <span className="text-zinc-500">Mano de obra</span>
                     <span className="text-zinc-300">{formatARS(manoDeObraNuevo)}</span>
+                  </div>
+                )}
+                {manoObraIncluida && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Mano de obra</span>
+                    <span className="text-green-500 font-bold">Incluida</span>
                   </div>
                 )}
                 {senaNum > 0 && (
@@ -650,9 +671,18 @@ export default function Ordenes() {
       {editTrabajo && (
         <EditTrabajoModal
           trabajo={editTrabajo}
+          cliente={clienteMap[editTrabajo.patente_id] ?? null}
           onClose={() => setEditTrabajo(null)}
-          onSaved={updated => {
+          onSaved={(updated, updatedCliente) => {
             setTrabajos(prev => prev.map(t => (t.id === updated.id ? updated : t)))
+            setClienteMap(prev => {
+              const next = { ...prev }
+              if (updatedCliente.patente !== editTrabajo.patente_id) {
+                delete next[editTrabajo.patente_id]
+              }
+              next[updatedCliente.patente] = updatedCliente
+              return next
+            })
             setEditTrabajo(null)
           }}
         />
