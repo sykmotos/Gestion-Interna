@@ -182,19 +182,16 @@ export default function Ordenes() {
       if (error) throw error
 
       // Si hay seña, registrarla en caja
-      const ops: Promise<unknown>[] = [decrementarStock(repuestosNuevo)]
+      await decrementarStock(repuestosNuevo)
       if (senaNum > 0 && nuevoTrabajo) {
-        ops.push(
-          supabase.from('caja_movimientos').insert({
-            tipo: 'ingreso',
-            concepto: `Seña Trabajo - ${patente}`,
-            monto: senaNum,
-            metodo_pago: 'Efectivo',
-            trabajo_id: nuevoTrabajo.id,
-          }),
-        )
+        await supabase.from('caja_movimientos').insert({
+          tipo: 'ingreso',
+          concepto: `Seña Trabajo - ${patente}`,
+          monto: senaNum,
+          metodo_pago: 'Efectivo',
+          trabajo_id: nuevoTrabajo.id,
+        })
       }
-      await Promise.all(ops)
 
       resetNuevo()
       switchTab('todas')
@@ -258,22 +255,18 @@ export default function Ordenes() {
       .eq('id', id)
 
     if (!error) {
-      const ops: Promise<unknown>[] = [decrementarStock(repuestosEntrega)]
+      await decrementarStock(repuestosEntrega)
 
       // Solo registrar el saldo si es > 0 (para no duplicar si ya se cobró con seña)
       if (saldoPendiente > 0) {
-        ops.push(
-          supabase.from('caja_movimientos').insert({
-            tipo: 'ingreso',
-            concepto: `Entrega: ${nombreCliente} (${t?.patente_id ?? ''})`,
-            monto: saldoPendiente,
-            metodo_pago: entregaForm.metodo_pago,
-            trabajo_id: id,
-          }),
-        )
+        await supabase.from('caja_movimientos').insert({
+          tipo: 'ingreso',
+          concepto: `Entrega: ${nombreCliente} (${t?.patente_id ?? ''})`,
+          monto: saldoPendiente,
+          metodo_pago: entregaForm.metodo_pago,
+          trabajo_id: id,
+        })
       }
-
-      await Promise.all(ops)
 
       setTrabajos(prev =>
         prev.map(w =>
@@ -626,32 +619,6 @@ export default function Ordenes() {
                     />
                   </div>
 
-                  {/* Preview financiero con seña */}
-                  {entregaForm.precio_cobrado && (
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 space-y-1.5">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-zinc-500">Repuestos</span>
-                        <span className="text-zinc-400">{formatARS(repuestosEntrega.reduce((s, i) => s + i.costo, 0))}</span>
-                      </div>
-                      {(t.sena ?? 0) > 0 && (
-                        <div className="flex justify-between text-xs">
-                          <span className="text-yellow-500 font-bold">Seña ya cobrada</span>
-                          <span className="text-yellow-500 font-bold">-{formatARS(t.sena ?? 0)}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between border-t border-zinc-800 pt-1.5">
-                        <span className="text-zinc-400 text-xs font-bold">
-                          {(t.sena ?? 0) > 0 ? 'Saldo a cobrar hoy' : 'Ganancia neta'}
-                        </span>
-                        <span className="text-orange-500 font-black text-lg">
-                          {(t.sena ?? 0) > 0
-                            ? formatARS(Math.max(0, (parseFloat(entregaForm.precio_cobrado) || 0) - (t.sena ?? 0)))
-                            : formatARS((parseFloat(entregaForm.precio_cobrado) || 0) - repuestosEntrega.reduce((s, i) => s + i.costo, 0))}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
                   <div className="flex gap-2">
                     <button
                       onClick={() => setPendienteEntrega(null)}
@@ -661,8 +628,7 @@ export default function Ordenes() {
                     </button>
                     <button
                       onClick={() => confirmarEntrega(t.id)}
-                      disabled={!entregaForm.precio_cobrado}
-                      className="flex-1 bg-orange-500 active:bg-orange-600 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-black py-4 rounded-xl uppercase tracking-wide"
+                      className="flex-1 bg-orange-500 active:bg-orange-600 text-white font-black py-4 rounded-xl uppercase tracking-wide"
                     >
                       CONFIRMAR
                     </button>
